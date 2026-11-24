@@ -2,7 +2,7 @@ import { buildApp } from "./app.ts";
 import { loadConfig } from "./config.ts";
 
 const config = loadConfig(process.env);
-const app = buildApp({ logger: true });
+const app = buildApp({ logger: true, corsOrigins: config.corsOrigins });
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {

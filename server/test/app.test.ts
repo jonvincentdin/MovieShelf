@@ -31,3 +31,79 @@ describe("config", () => {
     expect(() => loadConfig({ CORS_ORIGIN: "not a url" })).toThrow(/CORS_ORIGIN/);
   });
 });
+
+describe("error format", () => {
+  it("404s with { error: { code, message } }", async () => {
+    const res = await buildApp().inject({ method: "GET", url: "/api/nope" });
+    expect(res.statusCode).toBe(404);
+    expect(res.json()).toEqual({ error: { code: "NOT_FOUND", message: "Route not found" } });
+  });
+
+  it("hides internal error details", async () => {
+    const app = buildApp();
+    app.get("/boom", async () => {
+      throw new Error("db password is hunter2");
+    });
+    const res = await app.inject({ method: "GET", url: "/boom" });
+    expect(res.statusCode).toBe(500);
+    expect(res.json()).toEqual({ error: { code: "INTERNAL_ERROR", message: "Internal server error" } });
+  });
+
+  it("reports validation errors", async () => {
+    const app = buildApp();
+    app.get(
+      "/needs-q",
+      { schema: { querystring: { type: "object", required: ["q"], properties: { q: { type: "string" } } } } },
+      async () => ({}),
+    );
+    const res = await app.inject({ method: "GET", url: "/needs-q" });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.code).toBe("VALIDATION_ERROR");
+  });
+});
+
+describe("request IDs", () => {
+  it("generates one when absent", async () => {
+    const res = await buildApp().inject({ method: "GET", url: "/health" });
+    expect(res.headers["x-request-id"]).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it("echoes a safe incoming ID", async () => {
+    const res = await buildApp().inject({ method: "GET", url: "/health", headers: { "x-request-id": "abc-123" } });
+    expect(res.headers["x-request-id"]).toBe("abc-123");
+  });
+
+  it("replaces an unsafe incoming ID", async () => {
+    const res = await buildApp().inject({ method: "GET", url: "/health", headers: { "x-request-id": "a b<script>" } });
+    expect(res.headers["x-request-id"]).not.toBe("a b<script>");
+    expect(res.headers["x-request-id"]).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it("is also set on error responses", async () => {
+    const res = await buildApp().inject({ method: "GET", url: "/missing" });
+    expect(res.headers["x-request-id"]).toBeTruthy();
+  });
+});
+
+describe("CORS", () => {
+  const origin = "http://allowed.test";
+
+  it("allows a configured origin", async () => {
+    const res = await buildApp({ corsOrigins: [origin] }).inject({ method: "GET", url: "/health", headers: { origin } });
+    expect(res.headers["access-control-allow-origin"]).toBe(origin);
+  });
+
+  it("does not allow other origins", async () => {
+    const res = await buildApp({ corsOrigins: [origin] }).inject({
+      method: "GET",
+      url: "/health",
+      headers: { origin: "http://evil.test" },
+    });
+    expect(res.headers["access-control-allow-origin"]).toBeUndefined();
+  });
+
+  it("is off by default", async () => {
+    const res = await buildApp().inject({ method: "GET", url: "/health", headers: { origin } });
+    expect(res.headers["access-control-allow-origin"]).toBeUndefined();
+  });
+});
