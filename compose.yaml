@@ -1,0 +1,21 @@
+# Local development database only. Credentials here are dev defaults, not secrets.
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: movieshelf
+      POSTGRES_PASSWORD: movieshelf
+      POSTGRES_DB: movieshelf
+    ports:
+      # Set POSTGRES_PORT if 5432 is taken (e.g. by a native Postgres install).
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U movieshelf"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+volumes:
+  db-data:

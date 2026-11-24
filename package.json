@@ -10,7 +10,9 @@
     "preview": "vite preview",
     "dev:server": "npm run dev -w server",
     "typecheck": "npm run typecheck -w server",
-    "test": "npm test -w server"
+    "test": "npm test -w server",
+    "db:up": "docker compose up -d --wait db",
+    "db:migrate": "npm run db:migrate -w server"
   },
   "dependencies": {
     "@ant-design/icons": "^6.3.4",
