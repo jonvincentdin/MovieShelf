@@ -1,8 +1,11 @@
 import { buildApp } from "./app.ts";
 import { loadConfig } from "./config.ts";
+import { createDb } from "./db/client.ts";
 
 const config = loadConfig(process.env);
-const app = buildApp({ logger: true, corsOrigins: config.corsOrigins });
+const { db, pool } = createDb(config.databaseUrl);
+const app = buildApp({ logger: true, corsOrigins: config.corsOrigins, db });
+app.addHook("onClose", () => pool.end());
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
