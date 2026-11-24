@@ -1,2 +1,194 @@
-// Drizzle table definitions. Tables arrive in Phase 1 (BE-06, BE-07).
-export {};
+import {
+  date,
+  integer,
+  jsonb,
+  pgTable,
+  primaryKey,
+  real,
+  serial,
+  text,
+  timestamp,
+  unique,
+} from "drizzle-orm/pg-core";
+
+export type MediaType = "movie" | "series";
+
+// Placeholder artwork colours from the mock catalog; replaced by posterUrl/backdropUrl once real art exists.
+export type Palette = Record<string, string>;
+
+export interface Availability {
+  canStream: boolean;
+  canDownload: boolean;
+  format: string;
+  sizeBytes: number | null;
+  resolution: string;
+  statusText: string;
+}
+
+export interface Trailer {
+  title: string;
+  duration: string;
+  aspect: string;
+  summary: string;
+}
+
+const timestamps = {
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+};
+
+// ---- Lookups (BE-06) ----
+
+export const genres = pgTable(
+  "genres",
+  {
+    id: serial("id").primaryKey(),
+    mediaType: text("media_type").$type<MediaType>().notNull(),
+    name: text("name").notNull(),
+  },
+  (t) => [unique().on(t.mediaType, t.name)],
+);
+
+export const languages = pgTable("languages", {
+  code: text("code").primaryKey(),
+  label: text("label").notNull(),
+});
+
+export const regions = pgTable("regions", {
+  code: text("code").primaryKey(),
+  name: text("name").notNull(),
+});
+
+export const people = pgTable("people", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+});
+
+// ---- Movies (BE-06) ----
+
+export const movies = pgTable("movies", {
+  id: text("id").primaryKey(),
+  tmdbId: integer("tmdb_id").unique(),
+  imdbId: text("imdb_id").unique(),
+  title: text("title").notNull(),
+  originalTitle: text("original_title"),
+  year: integer("year"),
+  releaseDate: date("release_date", { mode: "string" }),
+  runtimeMinutes: integer("runtime_minutes"),
+  rating: real("rating"),
+  maturityRating: text("maturity_rating"),
+  languageCode: text("language_code").references(() => languages.code),
+  synopsis: text("synopsis"),
+  shortSynopsis: text("short_synopsis"),
+  directorId: text("director_id").references(() => people.id),
+  palette: jsonb("palette").$type<Palette>(),
+  // shortcut: availability/trailer are per-title JSON until license data (BE-35) and trailer metadata (BE-28) exist.
+  availability: jsonb("availability").$type<Availability>(),
+  trailer: jsonb("trailer").$type<Trailer>(),
+  ...timestamps,
+});
+
+export const movieGenres = pgTable(
+  "movie_genres",
+  {
+    movieId: text("movie_id").notNull().references(() => movies.id, { onDelete: "cascade" }),
+    genreId: integer("genre_id").notNull().references(() => genres.id),
+  },
+  (t) => [primaryKey({ columns: [t.movieId, t.genreId] })],
+);
+
+export const movieCast = pgTable(
+  "movie_cast",
+  {
+    movieId: text("movie_id").notNull().references(() => movies.id, { onDelete: "cascade" }),
+    personId: text("person_id").notNull().references(() => people.id),
+    character: text("character"),
+    role: text("role"),
+    position: integer("position").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.movieId, t.personId] })],
+);
+
+// ---- Series, chapters, pages (BE-07) ----
+
+export const series = pgTable("series", {
+  id: text("id").primaryKey(),
+  title: text("title").notNull(),
+  type: text("type").notNull(),
+  status: text("status").notNull(),
+  year: integer("year"),
+  rating: real("rating"),
+  author: text("author"),
+  artist: text("artist"),
+  readingDirection: text("reading_direction"),
+  readingFormat: text("reading_format"),
+  synopsis: text("synopsis"),
+  shortSynopsis: text("short_synopsis"),
+  palette: jsonb("palette").$type<Palette>(),
+  ...timestamps,
+});
+
+export const seriesAltTitles = pgTable(
+  "series_alt_titles",
+  {
+    seriesId: text("series_id").notNull().references(() => series.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    position: integer("position").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.seriesId, t.title] })],
+);
+
+export const seriesGenres = pgTable(
+  "series_genres",
+  {
+    seriesId: text("series_id").notNull().references(() => series.id, { onDelete: "cascade" }),
+    genreId: integer("genre_id").notNull().references(() => genres.id),
+  },
+  (t) => [primaryKey({ columns: [t.seriesId, t.genreId] })],
+);
+
+export const chapters = pgTable(
+  "chapters",
+  {
+    id: text("id").primaryKey(),
+    seriesId: text("series_id").notNull().references(() => series.id, { onDelete: "cascade" }),
+    // real, not integer: chapters like 10.5 exist.
+    number: real("number").notNull(),
+    title: text("title"),
+    releaseDate: date("release_date", { mode: "string" }),
+    palette: jsonb("palette").$type<Palette>(),
+    ...timestamps,
+  },
+  (t) => [unique().on(t.seriesId, t.number)],
+);
+
+export const chapterPages = pgTable(
+  "chapter_pages",
+  {
+    chapterId: text("chapter_id").notNull().references(() => chapters.id, { onDelete: "cascade" }),
+    pageNumber: integer("page_number").notNull(),
+    caption: text("caption"),
+    subCaption: text("sub_caption"),
+    palette: jsonb("palette").$type<Palette>(),
+    // Null until hosted pages exist (BE-33); the reader draws placeholder art from palette.
+    imageUrl: text("image_url"),
+  },
+  (t) => [primaryKey({ columns: [t.chapterId, t.pageNumber] })],
+);
+
+// ---- Curation ----
+
+// Editorial placement (hero, trending order, rails) kept off the title rows so it can change without editing titles.
+// media_id has no FK because it points at movies or series; queries join through media_type.
+export const featuredSlots = pgTable(
+  "featured_slots",
+  {
+    id: serial("id").primaryKey(),
+    slot: text("slot").notNull(),
+    mediaType: text("media_type").$type<MediaType>().notNull(),
+    mediaId: text("media_id").notNull(),
+    position: integer("position").notNull(),
+    kicker: text("kicker"),
+  },
+  (t) => [unique().on(t.slot, t.mediaType, t.mediaId)],
+);
