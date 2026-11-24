@@ -12,23 +12,34 @@ describe("health", () => {
 });
 
 describe("config", () => {
+  const DATABASE_URL = "postgres://u:p@localhost:5432/db";
+
   it("uses defaults", () => {
-    expect(loadConfig({})).toEqual({ host: "127.0.0.1", port: 3001, corsOrigins: [] });
+    expect(loadConfig({ DATABASE_URL })).toEqual({
+      host: "127.0.0.1",
+      port: 3001,
+      corsOrigins: [],
+      databaseUrl: DATABASE_URL,
+    });
   });
 
   it("parses CORS_ORIGIN list", () => {
-    expect(loadConfig({ CORS_ORIGIN: "http://a.test, http://b.test" }).corsOrigins).toEqual([
+    expect(loadConfig({ DATABASE_URL, CORS_ORIGIN: "http://a.test, http://b.test" }).corsOrigins).toEqual([
       "http://a.test",
       "http://b.test",
     ]);
   });
 
   it.each(["0", "70000", "abc", "3.5"])("rejects PORT=%s", (PORT) => {
-    expect(() => loadConfig({ PORT })).toThrow(/Invalid PORT/);
+    expect(() => loadConfig({ DATABASE_URL, PORT })).toThrow(/Invalid PORT/);
   });
 
   it("rejects a malformed CORS origin", () => {
-    expect(() => loadConfig({ CORS_ORIGIN: "not a url" })).toThrow(/CORS_ORIGIN/);
+    expect(() => loadConfig({ DATABASE_URL, CORS_ORIGIN: "not a url" })).toThrow(/CORS_ORIGIN/);
+  });
+
+  it.each([undefined, "", "mysql://x"])("rejects DATABASE_URL=%s", (url) => {
+    expect(() => loadConfig({ DATABASE_URL: url })).toThrow(/DATABASE_URL/);
   });
 });
 

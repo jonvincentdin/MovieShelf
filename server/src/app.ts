@@ -1,16 +1,20 @@
 import { randomUUID } from "node:crypto";
 import Fastify, { type FastifyError } from "fastify";
 import cors from "@fastify/cors";
+import { catalogRoutes } from "./catalog/routes.ts";
+import type { Db } from "./db/client.ts";
 
 export interface AppOptions {
   logger?: boolean;
   corsOrigins?: string[];
+  /** Catalog routes are only mounted when a database is given (unit tests run without one). */
+  db?: Db;
 }
 
 // Accept a caller's request ID only if it's safe to log and echo back.
 const SAFE_REQUEST_ID = /^[A-Za-z0-9._-]{1,64}$/;
 
-export function buildApp({ logger = false, corsOrigins = [] }: AppOptions = {}) {
+export function buildApp({ logger = false, corsOrigins = [], db }: AppOptions = {}) {
   const app = Fastify({
     logger,
     requestIdHeader: false,
@@ -54,6 +58,8 @@ export function buildApp({ logger = false, corsOrigins = [] }: AppOptions = {}) 
   for (const path of ["/health", "/api/health"]) {
     app.get(path, { schema: healthSchema }, async () => ({ ok: true }));
   }
+
+  if (db) app.register(catalogRoutes, { db });
 
   return app;
 }
