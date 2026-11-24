@@ -20,7 +20,12 @@ describe("config", () => {
       port: 3001,
       corsOrigins: [],
       databaseUrl: DATABASE_URL,
+      cookieSecure: false,
     });
+  });
+
+  it("marks the device cookie Secure in production", () => {
+    expect(loadConfig({ DATABASE_URL, NODE_ENV: "production" }).cookieSecure).toBe(true);
   });
 
   it("parses CORS_ORIGIN list", () => {
@@ -102,6 +107,7 @@ describe("CORS", () => {
   it("allows a configured origin", async () => {
     const res = await buildApp({ corsOrigins: [origin] }).inject({ method: "GET", url: "/health", headers: { origin } });
     expect(res.headers["access-control-allow-origin"]).toBe(origin);
+    expect(res.headers["access-control-allow-credentials"]).toBe("true");
   });
 
   it("does not allow other origins", async () => {
