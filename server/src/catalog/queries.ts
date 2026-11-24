@@ -1,4 +1,4 @@
-import { and, asc, count, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, inArray, sql, type Column } from "drizzle-orm";
 import type { Db } from "../db/client.ts";
 import {
   chapterPages,
@@ -21,6 +21,12 @@ import {
 
 const iso = (d: Date) => d.toISOString();
 
+/** Puts hydrated rows back in the order the page query chose. Unknown ids are dropped. */
+function inOrder<T extends { id: string }>(ids: string[], rows: T[]) {
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  return ids.flatMap((id) => byId.get(id) ?? []);
+}
+
 function group<T, V>(rows: T[], key: (r: T) => string, value: (r: T) => V) {
   const out = new Map<string, V[]>();
   for (const r of rows) {
@@ -31,41 +37,38 @@ function group<T, V>(rows: T[], key: (r: T) => string, value: (r: T) => V) {
   return out;
 }
 
-const trendingJoin = (mediaType: MediaType, idColumn: typeof movies.id | typeof series.id) =>
+export const trendingJoin = (mediaType: MediaType, idColumn: typeof movies.id | typeof series.id) =>
   and(eq(featuredSlots.slot, "trending"), eq(featuredSlots.mediaType, mediaType), eq(featuredSlots.mediaId, idColumn));
 
-/** Movies in trending order (untracked titles last, by title). `ids` limits the result; order is still trending order. */
-export async function getMovies(db: Db, ids?: string[]) {
-  if (ids && ids.length === 0) return [];
+/** Full movie DTOs for `ids`, in the same order. */
+export async function getMovies(db: Db, ids: string[]) {
+  if (ids.length === 0) return [];
   const rows = await db
     .select({ movie: movies, director: people.name, language: languages.label })
     .from(movies)
     .leftJoin(people, eq(people.id, movies.directorId))
     .leftJoin(languages, eq(languages.code, movies.languageCode))
-    .leftJoin(featuredSlots, trendingJoin("movie", movies.id))
-    .where(ids ? inArray(movies.id, ids) : undefined)
-    .orderBy(sql`${featuredSlots.position} asc nulls last`, asc(movies.title));
+    .where(inArray(movies.id, ids));
   if (rows.length === 0) return [];
 
-  const movieIds = rows.map((r) => r.movie.id);
   const [genreRows, castRows] = await Promise.all([
     db
       .select({ movieId: movieGenres.movieId, name: genres.name })
       .from(movieGenres)
       .innerJoin(genres, eq(genres.id, movieGenres.genreId))
-      .where(inArray(movieGenres.movieId, movieIds))
+      .where(inArray(movieGenres.movieId, ids))
       .orderBy(asc(movieGenres.position)),
     db
       .select({ movieId: movieCast.movieId, id: people.id, name: people.name, character: movieCast.character, role: movieCast.role })
       .from(movieCast)
       .innerJoin(people, eq(people.id, movieCast.personId))
-      .where(inArray(movieCast.movieId, movieIds))
+      .where(inArray(movieCast.movieId, ids))
       .orderBy(asc(movieCast.position)),
   ]);
   const genresBy = group(genreRows, (r) => r.movieId, (r) => r.name);
   const castBy = group(castRows, (r) => r.movieId, ({ id, name, character, role }) => ({ id, name, character, role }));
 
-  return rows.map(({ movie: m, director, language }) => ({
+  const dtos = rows.map(({ movie: m, director, language }) => ({
     id: m.id,
     tmdbId: m.tmdbId,
     imdbId: m.imdbId,
@@ -88,6 +91,7 @@ export async function getMovies(db: Db, ids?: string[]) {
     trailer: m.trailer,
     updatedAt: iso(m.updatedAt),
   }));
+  return inOrder(ids, dtos);
 }
 
 export async function getMovie(db: Db, id: string) {
@@ -96,97 +100,185 @@ export async function getMovie(db: Db, id: string) {
 
 export type MovieDto = Awaited<ReturnType<typeof getMovies>>[number];
 
-/** Chapter metadata with page counts, ascending by number. */
-async function getChaptersFor(db: Db, seriesIds: string[]) {
-  if (seriesIds.length === 0) return [];
-  const rows = await db
-    .select({
-      id: chapters.id,
-      seriesId: chapters.seriesId,
-      number: chapters.number,
-      title: chapters.title,
-      releaseDate: chapters.releaseDate,
-      palette: chapters.palette,
-      pageCount: count(chapterPages.pageNumber),
-    })
-    .from(chapters)
-    .leftJoin(chapterPages, eq(chapterPages.chapterId, chapters.id))
-    .where(inArray(chapters.seriesId, seriesIds))
-    .groupBy(chapters.id)
-    .orderBy(asc(chapters.seriesId), asc(chapters.number));
-  return rows;
-}
-
-export type ChapterDto = Awaited<ReturnType<typeof getChaptersFor>>[number];
-
-/** Series in trending order. chapterCount and latestChapter are computed from the chapter list. */
-export async function getSeries(db: Db, ids?: string[]) {
-  if (ids && ids.length === 0) return [];
-  const rows = await db
-    .select({ series })
-    .from(series)
-    .leftJoin(featuredSlots, trendingJoin("series", series.id))
-    .where(ids ? inArray(series.id, ids) : undefined)
-    .orderBy(sql`${featuredSlots.position} asc nulls last`, asc(series.title));
+/** Full series DTOs for `ids`, in the same order. chapterCount and latestChapter are computed from the chapter list. */
+export async function getSeries(db: Db, ids: string[]) {
+  if (ids.length === 0) return [];
+  const rows = await db.select().from(series).where(inArray(series.id, ids));
   if (rows.length === 0) return [];
 
-  const seriesIds = rows.map((r) => r.series.id);
-  // shortcut: loads every chapter row for the listed series; switch to a grouped query once lists paginate (BE-16).
-  const [altRows, genreRows, chapterRows] = await Promise.all([
+  const [altRows, genreRows, countRows, latestRows] = await Promise.all([
     db
       .select({ seriesId: seriesAltTitles.seriesId, title: seriesAltTitles.title })
       .from(seriesAltTitles)
-      .where(inArray(seriesAltTitles.seriesId, seriesIds))
+      .where(inArray(seriesAltTitles.seriesId, ids))
       .orderBy(asc(seriesAltTitles.position)),
     db
       .select({ seriesId: seriesGenres.seriesId, name: genres.name })
       .from(seriesGenres)
       .innerJoin(genres, eq(genres.id, seriesGenres.genreId))
-      .where(inArray(seriesGenres.seriesId, seriesIds))
+      .where(inArray(seriesGenres.seriesId, ids))
       .orderBy(asc(seriesGenres.position)),
-    getChaptersFor(db, seriesIds),
+    db
+      .select({ seriesId: chapters.seriesId, n: count() })
+      .from(chapters)
+      .where(inArray(chapters.seriesId, ids))
+      .groupBy(chapters.seriesId),
+    db
+      .selectDistinctOn([chapters.seriesId], {
+        seriesId: chapters.seriesId,
+        id: chapters.id,
+        number: chapters.number,
+        title: chapters.title,
+        releaseDate: chapters.releaseDate,
+      })
+      .from(chapters)
+      .where(inArray(chapters.seriesId, ids))
+      .orderBy(chapters.seriesId, desc(chapters.number)),
   ]);
   const altBy = group(altRows, (r) => r.seriesId, (r) => r.title);
   const genresBy = group(genreRows, (r) => r.seriesId, (r) => r.name);
-  const chaptersBy = group(chapterRows, (r) => r.seriesId, (r) => r);
+  const countBy = new Map(countRows.map((r) => [r.seriesId, r.n]));
+  const latestBy = new Map(latestRows.map(({ seriesId, ...latest }) => [seriesId, latest]));
 
-  return rows.map(({ series: s }) => {
-    const list = chaptersBy.get(s.id) ?? [];
-    const latest = list.at(-1);
-    return {
-      id: s.id,
-      title: s.title,
-      alternateTitles: altBy.get(s.id) ?? [],
-      type: s.type,
-      status: s.status,
-      year: s.year,
-      rating: s.rating,
-      author: s.author,
-      artist: s.artist,
-      readingDirection: s.readingDirection,
-      readingFormat: s.readingFormat,
-      genres: genresBy.get(s.id) ?? [],
-      synopsis: s.synopsis,
-      shortSynopsis: s.shortSynopsis,
-      palette: s.palette,
-      chapterCount: list.length,
-      latestChapter: latest
-        ? { id: latest.id, number: latest.number, title: latest.title, releaseDate: latest.releaseDate }
-        : null,
-      updatedAt: iso(s.updatedAt),
-    };
-  });
+  const dtos = rows.map((s) => ({
+    id: s.id,
+    title: s.title,
+    alternateTitles: altBy.get(s.id) ?? [],
+    type: s.type,
+    status: s.status,
+    year: s.year,
+    rating: s.rating,
+    author: s.author,
+    artist: s.artist,
+    readingDirection: s.readingDirection,
+    readingFormat: s.readingFormat,
+    genres: genresBy.get(s.id) ?? [],
+    synopsis: s.synopsis,
+    shortSynopsis: s.shortSynopsis,
+    palette: s.palette,
+    chapterCount: countBy.get(s.id) ?? 0,
+    latestChapter: latestBy.get(s.id) ?? null,
+    updatedAt: iso(s.updatedAt),
+  }));
+  return inOrder(ids, dtos);
 }
 
 export async function getOneSeries(db: Db, id: string) {
   return (await getSeries(db, [id]))[0] ?? null;
 }
 
-/** null when the series doesn't exist (vs. [] for a series with no chapters). */
-export async function getSeriesChapters(db: Db, seriesId: string) {
+// ---- Pagination and browse (BE-15, BE-16) ----
+
+export interface PageParams {
+  page: number;
+  pageSize: number;
+}
+
+export const paged = <T>(items: T[], { page, pageSize }: PageParams, total: number) => ({ items, page, pageSize, total });
+
+export interface MovieFilters extends PageParams {
+  genre?: string;
+  language?: string;
+  year?: number;
+  minRating?: number;
+  sort: "popularity" | "date" | "rating" | "az";
+}
+
+export interface SeriesFilters extends PageParams {
+  type?: string;
+  status?: string;
+  genre?: string;
+  year?: number;
+  sort: "popularity" | "latest" | "az" | "chapters";
+}
+
+const hasGenre = (link: typeof movieGenres | typeof seriesGenres, owner: Column, ownerId: Column, genre: string) =>
+  sql`exists (select 1 from ${link} join ${genres} on ${genres.id} = ${link.genreId} where ${owner} = ${ownerId} and ${genres.name} = ${genre})`;
+
+const offset = ({ page, pageSize }: PageParams) => (page - 1) * pageSize;
+
+/** Movies matching the Browse Movies filters. "popularity" is trending order, as the page does today. */
+export async function listMovies(db: Db, f: MovieFilters) {
+  const where = and(
+    f.genre ? hasGenre(movieGenres, movieGenres.movieId, movies.id, f.genre) : undefined,
+    f.language ? eq(movies.languageCode, f.language) : undefined,
+    f.year ? eq(movies.year, f.year) : undefined,
+    f.minRating != null ? gte(movies.rating, f.minRating) : undefined,
+  );
+  const order = {
+    popularity: [sql`${featuredSlots.position} asc nulls last`, asc(movies.title)],
+    date: [sql`${movies.releaseDate} desc nulls last`],
+    rating: [sql`${movies.rating} desc nulls last`],
+    az: [asc(movies.title)],
+  }[f.sort];
+  const [rows, [{ total }]] = await Promise.all([
+    db
+      .select({ id: movies.id })
+      .from(movies)
+      .leftJoin(featuredSlots, trendingJoin("movie", movies.id))
+      .where(where)
+      .orderBy(...order, asc(movies.id))
+      .limit(f.pageSize)
+      .offset(offset(f)),
+    db.select({ total: count() }).from(movies).where(where),
+  ]);
+  return paged(await getMovies(db, rows.map((r) => r.id)), f, total);
+}
+
+/** Series matching the Browse Manga filters. "popularity" is rating order, as the page does today. */
+export async function listSeries(db: Db, f: SeriesFilters) {
+  const where = and(
+    f.type ? eq(series.type, f.type) : undefined,
+    f.status ? eq(series.status, f.status) : undefined,
+    f.genre ? hasGenre(seriesGenres, seriesGenres.seriesId, series.id, f.genre) : undefined,
+    f.year ? eq(series.year, f.year) : undefined,
+  );
+  const chapterCount = sql`(select count(*) from ${chapters} where ${chapters.seriesId} = ${series.id})`;
+  const latestRelease = sql`(select max(${chapters.releaseDate}) from ${chapters} where ${chapters.seriesId} = ${series.id})`;
+  const order = {
+    popularity: [sql`${series.rating} desc nulls last`],
+    latest: [sql`${latestRelease} desc nulls last`],
+    az: [asc(series.title)],
+    chapters: [sql`${chapterCount} desc`],
+  }[f.sort];
+  const [rows, [{ total }]] = await Promise.all([
+    db
+      .select({ id: series.id })
+      .from(series)
+      .where(where)
+      .orderBy(...order, asc(series.id))
+      .limit(f.pageSize)
+      .offset(offset(f)),
+    db.select({ total: count() }).from(series).where(where),
+  ]);
+  return paged(await getSeries(db, rows.map((r) => r.id)), f, total);
+}
+
+/** A page of chapters with page counts, ascending by number. null when the series doesn't exist. */
+export async function getSeriesChapters(db: Db, seriesId: string, p: PageParams) {
   const [exists] = await db.select({ id: series.id }).from(series).where(eq(series.id, seriesId));
   if (!exists) return null;
-  return getChaptersFor(db, [seriesId]);
+  const [items, [{ total }]] = await Promise.all([
+    db
+      .select({
+        id: chapters.id,
+        seriesId: chapters.seriesId,
+        number: chapters.number,
+        title: chapters.title,
+        releaseDate: chapters.releaseDate,
+        palette: chapters.palette,
+        pageCount: count(chapterPages.pageNumber),
+      })
+      .from(chapters)
+      .leftJoin(chapterPages, eq(chapterPages.chapterId, chapters.id))
+      .where(eq(chapters.seriesId, seriesId))
+      .groupBy(chapters.id)
+      .orderBy(asc(chapters.number))
+      .limit(p.pageSize)
+      .offset(offset(p)),
+    db.select({ total: count() }).from(chapters).where(eq(chapters.seriesId, seriesId)),
+  ]);
+  return paged(items, p, total);
 }
 
 export async function getChapterPages(db: Db, chapterId: string) {

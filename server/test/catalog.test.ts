@@ -122,4 +122,101 @@ describe.skipIf(!url)("catalog API", () => {
     expect(body.manga.every((s: { type: string }) => s.type === "Manga")).toBe(true);
     expect(body.hero[0].kicker).toBe(MOCK_CATALOG.movies.find((m) => m.id === trendingOrder[0])!.kicker);
   });
+
+  // ---- Phase 2: browse, pagination, search ----
+
+  const ids = (body: { items: { id: string }[] }) => body.items.map((x) => x.id);
+  const hits = (body: { items: { kind: string; item: { id: string } }[] }) => body.items.map((x) => `${x.kind}:${x.item.id}`);
+
+  it("paginates movies with page metadata", async () => {
+    const first = (await get("/api/movies?pageSize=4")).body;
+    const third = (await get("/api/movies?pageSize=4&page=3")).body;
+    expect(first).toMatchObject({ page: 1, pageSize: 4, total: trendingOrder.length });
+    expect(ids(first)).toEqual(trendingOrder.slice(0, 4));
+    expect(ids(third)).toEqual(trendingOrder.slice(8, 12));
+    expect((await get("/api/movies?page=99")).body).toMatchObject({ items: [], total: trendingOrder.length });
+  });
+
+  it("filters movies like the Browse Movies page", async () => {
+    const mocks = MOCK_CATALOG.movies;
+    const drama = (await get("/api/movies?genre=Drama")).body;
+    expect(ids(drama).sort()).toEqual(mocks.filter((m) => m.genres.includes("Drama")).map((m) => m.id).sort());
+
+    const rated = (await get("/api/movies?minRating=8.5&language=EN&sort=rating")).body;
+    const expected = mocks
+      .filter((m) => m.languageCode === "EN" && parseFloat(m.rating) >= 8.5)
+      .sort((a, b) => parseFloat(b.rating) - parseFloat(a.rating));
+    expect(ids(rated)).toEqual(expected.map((m) => m.id));
+
+    const y = mocks[0].year;
+    expect((await get(`/api/movies?year=${y}`)).body.items.every((m: { year: number }) => m.year === y)).toBe(true);
+    expect(ids((await get("/api/movies?sort=az")).body)).toEqual(
+      [...mocks].sort((a, b) => a.title.localeCompare(b.title)).map((m) => m.id),
+    );
+  });
+
+  it("filters and sorts series like the Browse Manga page", async () => {
+    const manga = (await get("/api/series?type=Manga&status=Ongoing")).body;
+    expect(manga.items.length).toBeGreaterThan(0);
+    expect(manga.items.every((s: { type: string; status: string }) => s.type === "Manga" && s.status === "Ongoing")).toBe(true);
+
+    const byChapters = (await get("/api/series?sort=chapters")).body.items.map((s: { chapterCount: number }) => s.chapterCount);
+    expect(byChapters).toEqual([...byChapters].sort((a, b) => b - a));
+    const byRating = (await get("/api/series")).body.items.map((s: { rating: number }) => s.rating);
+    expect(byRating).toEqual([...byRating].sort((a, b) => b - a));
+  });
+
+  it("paginates chapters", async () => {
+    const { body } = await get("/api/series/ser-paper-moon/chapters?pageSize=2&page=2");
+    expect(body).toMatchObject({ page: 2, pageSize: 2, total: 3 });
+    expect(body.items.map((c: { number: number }) => c.number)).toEqual([3]);
+  });
+
+  it("searches titles, people and alternate titles", async () => {
+    expect(hits((await get("/api/search?q=last%20horizon")).body)[0]).toBe("movie:mov-last-horizon");
+    expect(hits((await get("/api/search?q=julian%20mercer")).body)).toContain("movie:mov-last-horizon"); // cast
+    expect(hits((await get("/api/search?q=Dawn%20Blade")).body)).toContain("series:ser-daybreak-chronicle"); // alt title
+  });
+
+  it("tolerates typos", async () => {
+    expect(hits((await get("/api/search?q=horizn")).body)[0]).toBe("movie:mov-last-horizon");
+  });
+
+  it("scopes, filters and paginates search", async () => {
+    const manhwa = (await get("/api/search?q=a&scope=manhwa")).body;
+    expect(manhwa.items.every((x: { kind: string; item: { type: string } }) => x.item.type === "Manhwa")).toBe(true);
+    const movies = (await get("/api/search?q=a&scope=movies&genre=Drama&pageSize=2")).body;
+    expect(movies.items).toHaveLength(2);
+    expect(movies.total).toBeGreaterThanOrEqual(2);
+    expect(movies.items.every((x: { item: { genres: string[] } }) => x.item.genres.includes("Drama"))).toBe(true);
+  });
+
+  it("treats LIKE wildcards literally", async () => {
+    expect((await get("/api/search?q=%25")).body.total).toBe(0);
+    // Only Paper Moon's artist ("studio_lantern") contains a literal underscore.
+    expect(hits((await get("/api/search?q=_")).body)).toEqual(["series:ser-paper-moon"]);
+  });
+
+  it("suggests up to 4 movies and 4 series", async () => {
+    const { status, body } = await get("/api/search/suggest?q=moon");
+    expect(status).toBe(200);
+    expect(body.series.map((s: { id: string }) => s.id)).toContain("ser-paper-moon");
+    expect(body.movies.length).toBeLessThanOrEqual(4);
+    expect(body.series.length).toBeLessThanOrEqual(4);
+  });
+
+  it.each([
+    "/api/search",
+    "/api/search?q=%20",
+    "/api/search?q=x&scope=books",
+    "/api/search/suggest",
+    "/api/movies?pageSize=101",
+    "/api/movies?page=0",
+    "/api/movies?minRating=11",
+    "/api/series?sort=rating",
+  ])("GET %s → 400", async (path) => {
+    const { status, body } = await get(path);
+    expect(status).toBe(400);
+    expect(body.error.code).toBe("VALIDATION_ERROR");
+  });
 });
