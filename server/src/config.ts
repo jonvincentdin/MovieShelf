@@ -3,6 +3,8 @@ export interface Config {
   port: number;
   corsOrigins: string[];
   databaseUrl: string;
+  /** Marks the device cookie Secure. On whenever NODE_ENV=production (the site must then be served over HTTPS). */
+  cookieSecure: boolean;
 }
 
 // Fails fast at startup instead of on the first request.
@@ -22,5 +24,11 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
   if (!/^postgres(ql)?:\/\//.test(databaseUrl)) {
     throw new Error("DATABASE_URL must be a postgres:// URL. Copy server/.env.example to server/.env.");
   }
-  return { host: env.HOST ?? "127.0.0.1", port, corsOrigins, databaseUrl };
+  return {
+    host: env.HOST ?? "127.0.0.1",
+    port,
+    corsOrigins,
+    databaseUrl,
+    cookieSecure: env.NODE_ENV === "production",
+  };
 }

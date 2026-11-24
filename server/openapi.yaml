@@ -311,8 +311,249 @@ paths:
                   manhwa: { type: array, items: { $ref: "#/components/schemas/CuratedSeries" } }
                   manga: { type: array, items: { $ref: "#/components/schemas/CuratedSeries" } }
 
+  # ---- Library and progress (Phase 3). All scoped to the device cookie. ----
+
+  /api/library:
+    get:
+      summary: My List for this device, newest first
+      description: Empty (and no cookie is set) when the browser has no device yet.
+      operationId: listLibrary
+      security: [{ device: [] }, {}]
+      responses:
+        "200":
+          description: Library items
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/LibraryItem" } }
+    post:
+      summary: Add a title to My List
+      description: |
+        The status is picked from history: movies Watched / Watching / Plan to Watch, series Completed / Reading / Plan to Read.
+        Adding a title that is already listed returns the existing item with 200, so offline queues can replay it.
+        Creates the device and sets its cookie on first use.
+      operationId: addToLibrary
+      security: [{ device: [] }, {}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mediaType, mediaId]
+              properties:
+                mediaType: { type: string, enum: [movie, series] }
+                mediaId: { type: string, examples: [mov-last-horizon] }
+                updatedAt: { $ref: "#/components/schemas/ClientTime" }
+      responses:
+        "201": { $ref: "#/components/responses/LibraryItem" }
+        "200": { $ref: "#/components/responses/LibraryItem" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /api/library/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    patch:
+      summary: Change a library item's status by hand
+      operationId: setLibraryStatus
+      security: [{ device: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { type: string, description: "Must be valid for the item's media type" }
+                updatedAt: { $ref: "#/components/schemas/ClientTime" }
+      responses:
+        "200": { $ref: "#/components/responses/LibraryItem" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Stale" }
+    delete:
+      summary: Remove from My List
+      operationId: removeFromLibrary
+      security: [{ device: [] }]
+      responses:
+        "204": { description: Removed }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /api/progress/movies:
+    get:
+      summary: Every movie this device has played, newest first
+      description: Continue Watching is the items with `inContinueWatching`; watch history is the items with `watched`.
+      operationId: listMovieProgress
+      security: [{ device: [] }, {}]
+      responses:
+        "200":
+          description: Movie progress
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/MovieProgress" } }
+
+  /api/progress/movies/{movieId}:
+    parameters:
+      - { name: movieId, in: path, required: true, schema: { type: string, pattern: "^mov-[a-z0-9-]{1,128}$" } }
+    put:
+      summary: Save playback position
+      description: |
+        Send one on play (positionSec 0) and then at most every 10 s. At ≥ 90 % the movie becomes Watched and leaves
+        Continue Watching; below that, a listed movie becomes Watching (Watched stays Watched).
+        A write within 10 s of the last one that changes no status gets 429 with Retry-After.
+      operationId: saveMovieProgress
+      security: [{ device: [] }, {}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [positionSec, durationSec]
+              properties:
+                positionSec: { type: number, minimum: 0 }
+                durationSec: { type: number, exclusiveMinimum: 0 }
+                updatedAt: { $ref: "#/components/schemas/ClientTime" }
+      responses:
+        "200":
+          description: Saved
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [progress, libraryItem]
+                properties:
+                  progress: { $ref: "#/components/schemas/MovieProgress" }
+                  libraryItem: { oneOf: [{ $ref: "#/components/schemas/LibraryItem" }, { type: "null" }] }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Stale" }
+        "429": { $ref: "#/components/responses/Throttled" }
+    delete:
+      summary: Remove from Continue Watching (history is kept)
+      operationId: dismissMovieProgress
+      security: [{ device: [] }]
+      responses:
+        "204": { description: Dismissed }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /api/progress/series:
+    get:
+      summary: Where this device is in each series, newest first
+      description: Continue Reading is the items with `inContinueReading`.
+      operationId: listSeriesProgress
+      security: [{ device: [] }, {}]
+      responses:
+        "200":
+          description: Reading progress
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/SeriesProgress" } }
+
+  /api/progress/series/{seriesId}:
+    parameters:
+      - $ref: "#/components/parameters/SeriesIdPath"
+    put:
+      summary: Save reading position
+      description: |
+        Send one when a chapter opens and on page turns. The chapter becomes In progress (Read stays Read), or Read
+        when pageIndex >= totalPages. When every chapter is Read the series becomes Completed and leaves Continue
+        Reading; otherwise a listed series becomes Reading. Throttled like movie progress, except that opening a
+        different chapter or changing any status is never throttled.
+      operationId: saveSeriesProgress
+      security: [{ device: [] }, {}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [chapterId, pageIndex, totalPages, mode]
+              properties:
+                chapterId: { type: string, examples: [ch-pm-2] }
+                pageIndex: { type: integer, minimum: 0 }
+                totalPages: { type: integer, minimum: 1 }
+                mode: { type: string, examples: [vertical, single] }
+                updatedAt: { $ref: "#/components/schemas/ClientTime" }
+      responses:
+        "200":
+          description: Saved
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [progress, chapterStatus, libraryItem]
+                properties:
+                  progress: { $ref: "#/components/schemas/SeriesProgress" }
+                  chapterStatus: { $ref: "#/components/schemas/ChapterStatusValue" }
+                  libraryItem: { oneOf: [{ $ref: "#/components/schemas/LibraryItem" }, { type: "null" }] }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Stale" }
+        "429": { $ref: "#/components/responses/Throttled" }
+    delete:
+      summary: Remove from Continue Reading
+      operationId: dismissSeriesProgress
+      security: [{ device: [] }]
+      responses:
+        "204": { description: Dismissed }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /api/progress/chapters:
+    get:
+      summary: Chapter statuses this device has set (missing chapters are Unread)
+      operationId: listChapterStatuses
+      security: [{ device: [] }, {}]
+      parameters:
+        - { name: seriesId, in: query, schema: { type: string, pattern: "^ser-[a-z0-9-]{1,128}$" } }
+      responses:
+        "200":
+          description: Chapter statuses
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [chapterId, seriesId, status, updatedAt]
+                      properties:
+                        chapterId: { type: string }
+                        seriesId: { type: string }
+                        status: { $ref: "#/components/schemas/ChapterStatusValue" }
+                        updatedAt: { type: string, format: date-time }
+
 components:
+  securitySchemes:
+    device:
+      type: apiKey
+      in: cookie
+      name: ms_device
+      description: |
+        Anonymous device ID. HttpOnly, SameSite=Lax, Path=/api, renewed on every write (400 days); Secure in
+        production. The first write creates it. No sign-in exists.
   parameters:
+    SeriesIdPath:
+      name: seriesId
+      in: path
+      required: true
+      schema: { type: string, pattern: "^ser-[a-z0-9-]{1,128}$" }
     Page:
       name: page
       in: query
@@ -343,6 +584,54 @@ components:
       schema:
         type: string
   schemas:
+    ClientTime:
+      type: string
+      format: date-time
+      description: |
+        When the change happened on the client (for offline sync). Defaults to now; capped at the server clock.
+        A write older than the saved one is refused with 409 STALE_WRITE (last write wins).
+
+    LibraryItem:
+      type: object
+      required: [id, mediaType, mediaId, status, addedAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        mediaType: { type: string, enum: [movie, series] }
+        mediaId: { type: string }
+        status: { type: string, enum: [Plan to Watch, Watching, Watched, Plan to Read, Reading, Completed] }
+        addedAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    MovieProgress:
+      type: object
+      required: [movieId, positionSec, durationSec, watched, watchedAt, inContinueWatching, updatedAt]
+      properties:
+        movieId: { type: string }
+        positionSec: { type: number }
+        durationSec: { type: number }
+        watched: { type: boolean }
+        watchedAt: { type: [string, "null"], format: date-time }
+        inContinueWatching: { type: boolean }
+        updatedAt: { type: string, format: date-time }
+
+    SeriesProgress:
+      type: object
+      required: [seriesId, chapterId, chapterNumber, pageIndex, totalPages, mode, inContinueReading, updatedAt]
+      properties:
+        seriesId: { type: string }
+        chapterId: { type: string }
+        chapterNumber: { type: number }
+        chapterTitle: { type: [string, "null"] }
+        pageIndex: { type: integer }
+        totalPages: { type: integer }
+        mode: { type: string }
+        inContinueReading: { type: boolean }
+        updatedAt: { type: string, format: date-time }
+
+    ChapterStatusValue:
+      type: string
+      enum: [Unread, In progress, Read]
+
     PageMeta:
       type: object
       required: [page, pageSize, total]
@@ -501,6 +790,24 @@ components:
               type: string
               description: Human-readable message. Internal errors never expose details.
   responses:
+    LibraryItem:
+      description: Library item
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/LibraryItem" }
+    Stale:
+      description: A newer change is already saved (STALE_WRITE). Refetch, then drop or reapply the queued write.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Throttled:
+      description: Progress for this title was saved under 10 s ago (TOO_MANY_WRITES). Retry after Retry-After seconds.
+      headers:
+        retry-after:
+          schema: { type: integer }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
     Error:
       description: Error response
       headers:

@@ -1,9 +1,7 @@
-import { fileURLToPath } from "node:url";
-import { migrate } from "drizzle-orm/node-postgres/migrator";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import { buildApp } from "../src/app.ts";
 import { createDb } from "../src/db/client.ts";
-import { MOCK_CATALOG, seed } from "../src/db/seed.ts";
+import { MOCK_CATALOG } from "../src/db/seed.ts";
 
 const url = process.env.DATABASE_URL;
 
@@ -16,12 +14,7 @@ describe.skipIf(!url)("catalog API", () => {
     return { status: res.statusCode, body: res.json() };
   };
 
-  beforeAll(async () => {
-    await migrate(db, { migrationsFolder: fileURLToPath(new URL("../src/db/migrations", import.meta.url)) });
-    await seed(db);
-    await seed(db); // idempotent
-  });
-
+  // test/global-setup.ts has already migrated and seeded (twice, to prove the seed is idempotent).
   afterAll(async () => {
     await app.close();
     await pool.end();

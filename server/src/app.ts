@@ -3,18 +3,20 @@ import Fastify, { type FastifyError } from "fastify";
 import cors from "@fastify/cors";
 import { catalogRoutes } from "./catalog/routes.ts";
 import type { Db } from "./db/client.ts";
+import { libraryRoutes } from "./library/routes.ts";
 
 export interface AppOptions {
   logger?: boolean;
   corsOrigins?: string[];
-  /** Catalog routes are only mounted when a database is given (unit tests run without one). */
+  /** Catalog and library routes are only mounted when a database is given (unit tests run without one). */
   db?: Db;
+  cookieSecure?: boolean;
 }
 
 // Accept a caller's request ID only if it's safe to log and echo back.
 const SAFE_REQUEST_ID = /^[A-Za-z0-9._-]{1,64}$/;
 
-export function buildApp({ logger = false, corsOrigins = [], db }: AppOptions = {}) {
+export function buildApp({ logger = false, corsOrigins = [], db, cookieSecure = false }: AppOptions = {}) {
   const app = Fastify({
     logger,
     requestIdHeader: false,
@@ -29,7 +31,8 @@ export function buildApp({ logger = false, corsOrigins = [], db }: AppOptions = 
   });
 
   // Empty list = same-origin only (the Vite proxy needs no CORS).
-  app.register(cors, { origin: corsOrigins.length > 0 ? corsOrigins : false });
+  // credentials: allowed origins may send the device cookie (it is SameSite=Lax, so only same-site origins can).
+  app.register(cors, { origin: corsOrigins.length > 0 ? corsOrigins : false, credentials: true });
 
   app.setErrorHandler((err: FastifyError, req, reply) => {
     const status = err.statusCode && err.statusCode >= 400 && err.statusCode < 600 ? err.statusCode : 500;
@@ -59,7 +62,10 @@ export function buildApp({ logger = false, corsOrigins = [], db }: AppOptions = 
     app.get(path, { schema: healthSchema }, async () => ({ ok: true }));
   }
 
-  if (db) app.register(catalogRoutes, { db });
+  if (db) {
+    app.register(catalogRoutes, { db });
+    app.register(libraryRoutes, { db, cookieSecure });
+  }
 
   return app;
 }
