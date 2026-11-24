@@ -37,20 +37,32 @@ paths:
 
   /api/movies:
     get:
-      summary: All movies in trending order
-      description: Unpaginated until BE-16; filters arrive in BE-15.
+      summary: Browse movies (the Browse Movies page filters)
       operationId: listMovies
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - { name: genre, in: query, schema: { type: string, maxLength: 100 } }
+        - { name: language, in: query, description: "Language code, e.g. EN", schema: { type: string, maxLength: 100 } }
+        - { name: year, in: query, schema: { type: integer } }
+        - { name: minRating, in: query, schema: { type: number, minimum: 0, maximum: 10 } }
+        - name: sort
+          in: query
+          description: "popularity = trending order; date = newest release first; rating = highest first"
+          schema: { type: string, enum: [popularity, date, rating, az], default: popularity }
       responses:
         "200":
-          description: Movies
+          description: A page of movies
           content:
             application/json:
               schema:
-                type: object
-                required: [items]
-                properties:
-                  items: { type: array, items: { $ref: "#/components/schemas/Movie" } }
-        default: { $ref: "#/components/responses/Error" }
+                allOf:
+                  - $ref: "#/components/schemas/PageMeta"
+                  - type: object
+                    required: [items]
+                    properties:
+                      items: { type: array, items: { $ref: "#/components/schemas/Movie" } }
+        "400": { $ref: "#/components/responses/Error" }
 
   /api/movies/{id}:
     get:
@@ -69,20 +81,32 @@ paths:
 
   /api/series:
     get:
-      summary: All series in trending order
-      description: Unpaginated until BE-16; filters arrive in BE-15.
+      summary: Browse series (the Browse Manga page filters)
       operationId: listSeries
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - { name: type, in: query, schema: { type: string, examples: [Manhwa, Manga] } }
+        - { name: status, in: query, schema: { type: string, examples: [Ongoing, Completed, Hiatus] } }
+        - { name: genre, in: query, schema: { type: string, maxLength: 100 } }
+        - { name: year, in: query, schema: { type: integer } }
+        - name: sort
+          in: query
+          description: "popularity = highest rating first; latest = most recent chapter release first; chapters = most chapters first"
+          schema: { type: string, enum: [popularity, latest, az, chapters], default: popularity }
       responses:
         "200":
-          description: Series
+          description: A page of series
           content:
             application/json:
               schema:
-                type: object
-                required: [items]
-                properties:
-                  items: { type: array, items: { $ref: "#/components/schemas/Series" } }
-        default: { $ref: "#/components/responses/Error" }
+                allOf:
+                  - $ref: "#/components/schemas/PageMeta"
+                  - type: object
+                    required: [items]
+                    properties:
+                      items: { type: array, items: { $ref: "#/components/schemas/Series" } }
+        "400": { $ref: "#/components/responses/Error" }
 
   /api/series/{id}:
     get:
@@ -105,16 +129,22 @@ paths:
       operationId: listChapters
       parameters:
         - $ref: "#/components/parameters/SeriesId"
+        - $ref: "#/components/parameters/Page"
+        - name: pageSize
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
       responses:
         "200":
-          description: Chapters
+          description: A page of chapters
           content:
             application/json:
               schema:
-                type: object
-                required: [items]
-                properties:
-                  items: { type: array, items: { $ref: "#/components/schemas/Chapter" } }
+                allOf:
+                  - $ref: "#/components/schemas/PageMeta"
+                  - type: object
+                    required: [items]
+                    properties:
+                      items: { type: array, items: { $ref: "#/components/schemas/Chapter" } }
         "400": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
 
@@ -141,6 +171,58 @@ paths:
                   pages: { type: array, items: { $ref: "#/components/schemas/Page" } }
         "400": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+
+  /api/search:
+    get:
+      summary: Search movies and series
+      description: |
+        Matches title, original and alternate titles, director, cast, author, artist and genres.
+        A substring, a whole word, or a close spelling matches ("horizn" finds "Last Horizon").
+      operationId: search
+      parameters:
+        - $ref: "#/components/parameters/SearchQuery"
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - name: scope
+          in: query
+          schema: { type: string, enum: [all, movies, series, manga, manhwa], default: all }
+        - { name: genre, in: query, schema: { type: string, maxLength: 100 } }
+        - name: sort
+          in: query
+          description: "relevance = best match first, then trending order"
+          schema: { type: string, enum: [relevance, rating, year, az], default: relevance }
+      responses:
+        "200":
+          description: A page of mixed results
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PageMeta"
+                  - type: object
+                    required: [items]
+                    properties:
+                      items: { type: array, items: { $ref: "#/components/schemas/SearchHit" } }
+        "400": { $ref: "#/components/responses/Error" }
+
+  /api/search/suggest:
+    get:
+      summary: Top matches for the Quick Search box (up to 4 movies and 4 series)
+      operationId: suggest
+      parameters:
+        - $ref: "#/components/parameters/SearchQuery"
+      responses:
+        "200":
+          description: Suggestions
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [movies, series]
+                properties:
+                  movies: { type: array, maxItems: 4, items: { $ref: "#/components/schemas/Movie" } }
+                  series: { type: array, maxItems: 4, items: { $ref: "#/components/schemas/Series" } }
+        "400": { $ref: "#/components/responses/Error" }
 
   /api/meta/genres:
     get:
@@ -231,6 +313,20 @@ paths:
 
 components:
   parameters:
+    Page:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 10000, default: 1 }
+    PageSize:
+      name: pageSize
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+    SearchQuery:
+      name: q
+      in: query
+      required: true
+      description: Trimmed; must contain a non-space character.
+      schema: { type: string, maxLength: 100, pattern: '\S' }
     MovieId:
       name: id
       in: path
@@ -247,6 +343,27 @@ components:
       schema:
         type: string
   schemas:
+    PageMeta:
+      type: object
+      required: [page, pageSize, total]
+      properties:
+        page: { type: integer }
+        pageSize: { type: integer }
+        total: { type: integer, description: Matching items across all pages }
+
+    SearchHit:
+      oneOf:
+        - type: object
+          required: [kind, item]
+          properties:
+            kind: { const: movie }
+            item: { $ref: "#/components/schemas/Movie" }
+        - type: object
+          required: [kind, item]
+          properties:
+            kind: { const: series }
+            item: { $ref: "#/components/schemas/Series" }
+
     Palette:
       description: Placeholder artwork colours until real posters exist.
       type: [object, "null"]
