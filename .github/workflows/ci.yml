@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: movieshelf
+          POSTGRES_PASSWORD: movieshelf
+          POSTGRES_DB: movieshelf
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U movieshelf"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 15
+    env:
+      DATABASE_URL: postgres://movieshelf:movieshelf@localhost:5432/movieshelf
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: Migrations apply on a clean database
+        run: npm run db:migrate
+      - name: Migrations are idempotent
+        run: npm run db:migrate
+      - name: Migration history is consistent
+        run: npm run db:check -w server
+      - name: Schema has no ungenerated changes
+        run: |
+          npm run db:generate -w server
+          git status --porcelain server/src/db
+          test -z "$(git status --porcelain server/src/db)"
