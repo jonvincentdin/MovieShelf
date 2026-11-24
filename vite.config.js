@@ -4,6 +4,10 @@ import { defineConfig } from "vite";
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  server: {
+    // Backend from `npm run dev:server`; keeps API calls same-origin in dev.
+    proxy: { "/api": "http://127.0.0.1:3001" },
+  },
   build: {
     rolldownOptions: {
       output: {

@@ -1,0 +1,68 @@
+openapi: 3.1.0
+info:
+  title: MovieShelf API
+  version: 0.1.0
+  description: |
+    Backend for the MovieShelf frontend. Contract-first: agree on shapes here before writing routes.
+
+    Conventions:
+    - All app routes live under `/api`. In dev, Vite proxies `/api` to the server.
+    - Errors always use the `Error` schema below.
+    - Every response carries an `x-request-id` header. Send your own (1–64 chars of `A-Za-z0-9._-`) to correlate logs; otherwise the server generates a UUID.
+    - Timestamps are ISO 8601 strings; the frontend formats "2 days ago" itself.
+servers:
+  - url: /
+paths:
+  /api/health:
+    get:
+      summary: Liveness check (also served at `/health`)
+      operationId: getHealth
+      responses:
+        "200":
+          description: Server is up
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok:
+                    type: boolean
+                    const: true
+        default:
+          $ref: "#/components/responses/Error"
+components:
+  headers:
+    RequestId:
+      description: Request ID for log correlation
+      schema:
+        type: string
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              description: Stable, machine-readable code (e.g. NOT_FOUND, VALIDATION_ERROR, INTERNAL_ERROR)
+              examples: [NOT_FOUND]
+            message:
+              type: string
+              description: Human-readable message. Internal errors never expose details.
+  responses:
+    Error:
+      description: Error response
+      headers:
+        x-request-id:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"

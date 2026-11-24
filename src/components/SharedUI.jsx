@@ -1144,8 +1144,6 @@ export function ContentPreviewModal({
   onToggleList,
   isInList,
   autoStatus = null,
-  region = "PH",
-  onRegionChange,
   allMovies = [],
   allSeries = [],
   chapterStatuses = {},
