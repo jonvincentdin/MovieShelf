@@ -41,6 +41,10 @@ jobs:
         run: npm run db:migrate
       - name: Migration history is consistent
         run: npm run db:check -w server
+      - name: Seed loads and is idempotent
+        run: |
+          npm run db:seed
+          npm run db:seed
       - name: Schema has no ungenerated changes
         run: |
           npm run db:generate -w server

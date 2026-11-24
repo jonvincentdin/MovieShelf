@@ -34,13 +34,340 @@ paths:
                     const: true
         default:
           $ref: "#/components/responses/Error"
+
+  /api/movies:
+    get:
+      summary: All movies in trending order
+      description: Unpaginated until BE-16; filters arrive in BE-15.
+      operationId: listMovies
+      responses:
+        "200":
+          description: Movies
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/Movie" } }
+        default: { $ref: "#/components/responses/Error" }
+
+  /api/movies/{id}:
+    get:
+      summary: One movie
+      operationId: getMovie
+      parameters:
+        - $ref: "#/components/parameters/MovieId"
+      responses:
+        "200":
+          description: Movie
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Movie" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /api/series:
+    get:
+      summary: All series in trending order
+      description: Unpaginated until BE-16; filters arrive in BE-15.
+      operationId: listSeries
+      responses:
+        "200":
+          description: Series
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/Series" } }
+        default: { $ref: "#/components/responses/Error" }
+
+  /api/series/{id}:
+    get:
+      summary: One series (without its chapter list)
+      operationId: getSeries
+      parameters:
+        - $ref: "#/components/parameters/SeriesId"
+      responses:
+        "200":
+          description: Series
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Series" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /api/series/{id}/chapters:
+    get:
+      summary: Chapters of a series, ascending by number
+      operationId: listChapters
+      parameters:
+        - $ref: "#/components/parameters/SeriesId"
+      responses:
+        "200":
+          description: Chapters
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/Chapter" } }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /api/chapters/{id}/pages:
+    get:
+      summary: Page manifest for a chapter
+      operationId: getChapterPages
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, pattern: "^ch-[a-z0-9-]{1,128}$" }
+      responses:
+        "200":
+          description: Pages in reading order
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [chapterId, seriesId, pages]
+                properties:
+                  chapterId: { type: string }
+                  seriesId: { type: string }
+                  pages: { type: array, items: { $ref: "#/components/schemas/Page" } }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /api/meta/genres:
+    get:
+      summary: Genre names for movies or series
+      operationId: listGenres
+      parameters:
+        - name: type
+          in: query
+          required: true
+          schema: { type: string, enum: [movie, series] }
+      responses:
+        "200":
+          description: Genre names
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { type: string } }
+        "400": { $ref: "#/components/responses/Error" }
+
+  /api/meta/languages:
+    get:
+      summary: Movie languages
+      operationId: listLanguages
+      responses:
+        "200":
+          description: Languages
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [code, label]
+                      properties:
+                        code: { type: string, examples: [TL] }
+                        label: { type: string, examples: [Filipino / Tagalog] }
+
+  /api/meta/regions:
+    get:
+      summary: Regions for Where to Watch
+      operationId: listRegions
+      responses:
+        "200":
+          description: Regions
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [code, name]
+                      properties:
+                        code: { type: string, examples: [PH] }
+                        name: { type: string, examples: [Philippines] }
+
+  /api/home:
+    get:
+      summary: Home page rails
+      description: Rails come from the curation table (featured_slots). `manhwa` and `manga` are `trendingSeries` filtered by type.
+      operationId: getHome
+      responses:
+        "200":
+          description: Rails
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [hero, trending, recentReleases, regionalPicks, trendingSeries, manhwa, manga]
+                properties:
+                  hero: { type: array, items: { $ref: "#/components/schemas/CuratedMovie" } }
+                  trending: { type: array, items: { $ref: "#/components/schemas/CuratedMovie" } }
+                  recentReleases: { type: array, items: { $ref: "#/components/schemas/CuratedMovie" } }
+                  regionalPicks: { type: array, items: { $ref: "#/components/schemas/CuratedMovie" } }
+                  trendingSeries: { type: array, items: { $ref: "#/components/schemas/CuratedSeries" } }
+                  manhwa: { type: array, items: { $ref: "#/components/schemas/CuratedSeries" } }
+                  manga: { type: array, items: { $ref: "#/components/schemas/CuratedSeries" } }
+
 components:
+  parameters:
+    MovieId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, pattern: "^mov-[a-z0-9-]{1,128}$" }
+    SeriesId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, pattern: "^ser-[a-z0-9-]{1,128}$" }
   headers:
     RequestId:
       description: Request ID for log correlation
       schema:
         type: string
   schemas:
+    Palette:
+      description: Placeholder artwork colours until real posters exist.
+      type: [object, "null"]
+      additionalProperties: { type: string }
+
+    Movie:
+      type: object
+      required: [id, title, genres, cast, updatedAt]
+      properties:
+        id: { type: string, examples: [mov-last-horizon] }
+        tmdbId: { type: [integer, "null"] }
+        imdbId: { type: [string, "null"] }
+        title: { type: string }
+        originalTitle: { type: [string, "null"] }
+        year: { type: [integer, "null"] }
+        releaseDate: { type: [string, "null"], format: date }
+        runtimeMinutes: { type: [integer, "null"], description: Replaces the old `runtime` label. Format it on the client. }
+        rating: { type: [number, "null"], examples: [8.9] }
+        maturityRating: { type: [string, "null"], examples: [PG-13] }
+        languageCode: { type: [string, "null"], examples: [EN] }
+        originalLanguage: { type: [string, "null"], description: Label for languageCode }
+        genres: { type: array, items: { type: string }, description: First entry is the primary genre }
+        synopsis: { type: [string, "null"] }
+        shortSynopsis: { type: [string, "null"] }
+        director: { type: [string, "null"] }
+        cast:
+          type: array
+          items:
+            type: object
+            required: [id, name]
+            properties:
+              id: { type: string, examples: [per-julian-mercer] }
+              name: { type: string }
+              character: { type: [string, "null"] }
+              role: { type: [string, "null"] }
+        palette: { $ref: "#/components/schemas/Palette" }
+        availability:
+          description: Per-title for now; computed from license data in BE-35.
+          type: [object, "null"]
+          properties:
+            canStream: { type: boolean }
+            canDownload: { type: boolean }
+            format: { type: string }
+            sizeBytes: { type: [integer, "null"], description: Replaces `sizeLabel`. Null for stream-only titles. }
+            resolution: { type: string }
+            statusText: { type: string }
+        trailer:
+          type: [object, "null"]
+          properties:
+            title: { type: string }
+            duration: { type: string }
+            aspect: { type: string }
+            summary: { type: string }
+        updatedAt: { type: string, format: date-time }
+
+    CuratedMovie:
+      allOf:
+        - $ref: "#/components/schemas/Movie"
+        - type: object
+          properties:
+            kicker: { type: [string, "null"], description: Editorial label for this placement }
+
+    Series:
+      type: object
+      required: [id, title, type, status, alternateTitles, genres, chapterCount, updatedAt]
+      properties:
+        id: { type: string, examples: [ser-paper-moon] }
+        title: { type: string }
+        alternateTitles: { type: array, items: { type: string } }
+        type: { type: string, examples: [Manhwa, Manga] }
+        status: { type: string, examples: [Ongoing, Completed, Hiatus] }
+        year: { type: [integer, "null"] }
+        rating: { type: [number, "null"] }
+        author: { type: [string, "null"] }
+        artist: { type: [string, "null"] }
+        readingDirection: { type: [string, "null"], examples: [LTR, RTL] }
+        readingFormat: { type: [string, "null"] }
+        genres: { type: array, items: { type: string } }
+        synopsis: { type: [string, "null"] }
+        shortSynopsis: { type: [string, "null"] }
+        palette: { $ref: "#/components/schemas/Palette" }
+        chapterCount: { type: integer, description: Computed from the chapter list }
+        latestChapter:
+          description: Highest-numbered chapter. Its releaseDate replaces the old `updatedLabel`.
+          type: [object, "null"]
+          properties:
+            id: { type: string }
+            number: { type: number }
+            title: { type: [string, "null"] }
+            releaseDate: { type: [string, "null"], format: date }
+        updatedAt: { type: string, format: date-time }
+
+    CuratedSeries:
+      allOf:
+        - $ref: "#/components/schemas/Series"
+        - type: object
+          properties:
+            kicker: { type: [string, "null"] }
+
+    Chapter:
+      type: object
+      required: [id, seriesId, number, pageCount]
+      properties:
+        id: { type: string, examples: [ch-pm-2] }
+        seriesId: { type: string }
+        number: { type: number, description: May be fractional (10.5) }
+        title: { type: [string, "null"] }
+        releaseDate: { type: [string, "null"], format: date }
+        palette: { $ref: "#/components/schemas/Palette" }
+        pageCount: { type: integer }
+
+    Page:
+      type: object
+      required: [pageNumber]
+      properties:
+        pageNumber: { type: integer }
+        caption: { type: [string, "null"] }
+        subCaption: { type: [string, "null"] }
+        palette: { $ref: "#/components/schemas/Palette" }
+        imageUrl: { type: [string, "null"], description: Null until hosted pages exist (BE-33) }
+
     Error:
       type: object
       required: [error]
