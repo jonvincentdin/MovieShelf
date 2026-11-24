@@ -93,6 +93,8 @@ export const movieGenres = pgTable(
   {
     movieId: text("movie_id").notNull().references(() => movies.id, { onDelete: "cascade" }),
     genreId: integer("genre_id").notNull().references(() => genres.id),
+    // Order matters: the first genre is shown as the primary one.
+    position: integer("position").notNull(),
   },
   (t) => [primaryKey({ columns: [t.movieId, t.genreId] })],
 );
@@ -143,6 +145,7 @@ export const seriesGenres = pgTable(
   {
     seriesId: text("series_id").notNull().references(() => series.id, { onDelete: "cascade" }),
     genreId: integer("genre_id").notNull().references(() => genres.id),
+    position: integer("position").notNull(),
   },
   (t) => [primaryKey({ columns: [t.seriesId, t.genreId] })],
 );

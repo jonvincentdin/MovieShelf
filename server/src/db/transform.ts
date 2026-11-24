@@ -166,7 +166,7 @@ export function buildSeedRows(mock: MockCatalog) {
     ...genreRows("series", [...mock.seriesGenres, ...mock.series.flatMap((s) => s.genres)]),
   ];
 
-  const movieGenres = mock.movies.flatMap((m) => [...new Set(m.genres)].map((name) => ({ movieId: m.id, name })));
+  const movieGenres = mock.movies.flatMap((m) => [...new Set(m.genres)].map((name, position) => ({ movieId: m.id, name, position })));
 
   const series = mock.series.map((s) => ({
     id: s.id,
@@ -187,7 +187,7 @@ export function buildSeedRows(mock: MockCatalog) {
   const seriesAltTitles = mock.series.flatMap((s) =>
     [...new Set(s.alternateTitles ?? [])].map((title, i) => ({ seriesId: s.id, title, position: i })),
   );
-  const seriesGenres = mock.series.flatMap((s) => [...new Set(s.genres)].map((name) => ({ seriesId: s.id, name })));
+  const seriesGenres = mock.series.flatMap((s) => [...new Set(s.genres)].map((name, position) => ({ seriesId: s.id, name, position })));
 
   const allChapters = mock.series.flatMap((s) => s.chapters);
   const chapters = allChapters.map((c) => ({

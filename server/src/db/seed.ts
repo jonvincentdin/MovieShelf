@@ -64,7 +64,7 @@ export async function seed(db: Db, mock: MockCatalog = MOCK_CATALOG) {
     await tx.delete(t.movieGenres).where(inArray(t.movieGenres.movieId, movieIds));
     await tx
       .insert(t.movieGenres)
-      .values(rows.movieGenres.map((g) => ({ movieId: g.movieId, genreId: genreId("movie", g.name) })));
+      .values(rows.movieGenres.map((g) => ({ movieId: g.movieId, genreId: genreId("movie", g.name), position: g.position })));
     await tx.delete(t.movieCast).where(inArray(t.movieCast.movieId, movieIds));
     await tx.insert(t.movieCast).values(rows.movieCast);
 
@@ -78,7 +78,7 @@ export async function seed(db: Db, mock: MockCatalog = MOCK_CATALOG) {
     await tx.delete(t.seriesGenres).where(inArray(t.seriesGenres.seriesId, seriesIds));
     await tx
       .insert(t.seriesGenres)
-      .values(rows.seriesGenres.map((g) => ({ seriesId: g.seriesId, genreId: genreId("series", g.name) })));
+      .values(rows.seriesGenres.map((g) => ({ seriesId: g.seriesId, genreId: genreId("series", g.name), position: g.position })));
 
     const chapterIds = rows.chapters.map((c) => c.id);
     await tx.insert(t.chapters).values(rows.chapters).onConflictDoUpdate({
