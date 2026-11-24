@@ -8,6 +8,8 @@ import {
   serial,
   text,
   timestamp,
+  boolean,
+  uuid,
   unique,
 } from "drizzle-orm/pg-core";
 
@@ -194,4 +196,84 @@ export const featuredSlots = pgTable(
     kicker: text("kicker"),
   },
   (t) => [unique().on(t.slot, t.mediaType, t.mediaId)],
+);
+
+// ---- Per-device library and progress (BE-17, BE-18) ----
+
+// Anonymous identity: the id is the secret held in the HTTP-only cookie. Deleting a device deletes its data.
+export const devices = pgTable("devices", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+const deviceId = () =>
+  uuid("device_id")
+    .notNull()
+    .references(() => devices.id, { onDelete: "cascade" });
+// Last write wins (BE-24): holds the client's change time, capped at the server clock.
+const updatedAt = () => timestamp("updated_at", { withTimezone: true }).notNull().defaultNow();
+
+// My List. media_id has no FK because it points at movies or series; the API checks it exists.
+export const libraryItems = pgTable(
+  "library_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    deviceId: deviceId(),
+    mediaType: text("media_type").$type<MediaType>().notNull(),
+    mediaId: text("media_id").notNull(),
+    status: text("status").notNull(),
+    addedAt: timestamp("added_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [unique().on(t.deviceId, t.mediaType, t.mediaId)],
+);
+
+// One row per movie a device has played. watched_at is the watch history; in_continue drives Continue Watching.
+export const watchProgress = pgTable(
+  "watch_progress",
+  {
+    deviceId: deviceId(),
+    movieId: text("movie_id")
+      .notNull()
+      .references(() => movies.id, { onDelete: "cascade" }),
+    positionSec: real("position_sec").notNull(),
+    durationSec: real("duration_sec").notNull(),
+    watchedAt: timestamp("watched_at", { withTimezone: true }),
+    inContinue: boolean("in_continue").notNull(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [primaryKey({ columns: [t.deviceId, t.movieId] })],
+);
+
+// Where a device is in a series; in_continue drives Continue Reading.
+export const readingProgress = pgTable(
+  "reading_progress",
+  {
+    deviceId: deviceId(),
+    seriesId: text("series_id")
+      .notNull()
+      .references(() => series.id, { onDelete: "cascade" }),
+    chapterId: text("chapter_id")
+      .notNull()
+      .references(() => chapters.id, { onDelete: "cascade" }),
+    pageIndex: integer("page_index").notNull(),
+    totalPages: integer("total_pages").notNull(),
+    mode: text("mode").notNull(),
+    inContinue: boolean("in_continue").notNull(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [primaryKey({ columns: [t.deviceId, t.seriesId] })],
+);
+
+export const chapterStatus = pgTable(
+  "chapter_status",
+  {
+    deviceId: deviceId(),
+    chapterId: text("chapter_id")
+      .notNull()
+      .references(() => chapters.id, { onDelete: "cascade" }),
+    status: text("status").notNull(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [primaryKey({ columns: [t.deviceId, t.chapterId] })],
 );
