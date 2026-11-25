@@ -840,6 +840,7 @@ export function SeriesDetailsPage({
 export function ChapterReaderPage({
   seriesItem,
   chapter,
+  initialPage = 1,
   onSelectChapter,
   onBackToSeries,
   onUpdateReadingProgress,
@@ -849,7 +850,7 @@ export function ChapterReaderPage({
   const [fitMode, setFitMode] = useState("width"); // width | height
   const [zoomPct, setZoomPct] = useState(100);
   const [direction, setDirection] = useState(seriesItem?.readingDirection || "LTR");
-  const [currentPage, setCurrentPage] = useState(3); // Starts at Page 3/6 • 50% matching 06_manga_reader.png
+  const [currentPage, setCurrentPage] = useState(initialPage); // resumes from Continue Reading
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   const pages = chapter?.pages || [];

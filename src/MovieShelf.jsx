@@ -1,14 +1,21 @@
 import { useState, useRef, useEffect } from "react";
 import "./styles.css";
-import { MOVIES_DATA } from "./data/moviesData.js";
-import { MANGA_SERIES } from "./data/mangaData.js";
+import { storage } from "./api/client.js";
+import { cachedCatalog, cachedPages, fetchCatalog, fetchChapterPages } from "./api/catalog.js";
 import {
-  INITIAL_MY_LIST,
-  INITIAL_CONTINUE_WATCHING,
-  INITIAL_CONTINUE_READING,
-  INITIAL_MOVIE_DOWNLOADS,
-  INITIAL_MANGA_DOWNLOADS,
-} from "./data/libraryData.js";
+  flush,
+  loadLibrary,
+  pendingChanges,
+  pullLibrary,
+  queueAddToList,
+  queueDismissMovie,
+  queueDismissSeries,
+  queueMovieProgress,
+  queueReadingProgress,
+  queueRemoveFromList,
+  saveLibrary,
+  setSyncPaused,
+} from "./api/sync.js";
 import { NavigationHeader, Footer } from "./components/NavigationShell.jsx";
 import {
   HomePage,
@@ -40,27 +47,33 @@ import { X } from "lucide-react";
  */
 export default function MovieShelf() {
   const [route, setRoute] = useState("/");
-  const [activeMovieId, setActiveMovieId] = useState("mov-last-horizon");
-  const [activeSeriesId, setActiveSeriesId] = useState("ser-paper-moon");
-  const [activeChapterId, setActiveChapterId] = useState("ch-pm-2");
+  const [activeMovieId, setActiveMovieId] = useState(null);
+  const [activeSeriesId, setActiveSeriesId] = useState(null);
+  const [activeChapterId, setActiveChapterId] = useState(null);
   const [localPlayerFile, setLocalPlayerFile] = useState("The_Last_Horizon_1080p_Local.mp4");
 
   const [searchQuery, setSearchQuery] = useState("");
   const [searchScope, setSearchScope] = useState("all");
   const [region, setRegion] = useState("PH");
-  const [isOffline, setIsOffline] = useState(false);
+  const [isOffline, setIsOffline] = useState(() => !navigator.onLine);
 
-  const [myList, setMyList] = useState(INITIAL_MY_LIST);
-  const [watchedMovies, setWatchedMovies] = useState(["mov-blue-hour"]);
-  const [continueWatching, setContinueWatching] = useState(INITIAL_CONTINUE_WATCHING);
-  const [continueReading, setContinueReading] = useState(INITIAL_CONTINUE_READING);
-  const [movieDownloads, setMovieDownloads] = useState(INITIAL_MOVIE_DOWNLOADS);
-  const [mangaDownloads, setMangaDownloads] = useState(INITIAL_MANGA_DOWNLOADS);
-  const [chapterStatuses, setChapterStatuses] = useState({
-    "ch-pm-3": "Unread",
-    "ch-pm-2": "In progress",
-    "ch-pm-1": "Read",
-  });
+  // Catalog from the API; the last copy is cached so the app opens instantly and works offline.
+  const [catalog, setCatalog] = useState(cachedCatalog);
+  const [catalogError, setCatalogError] = useState(null);
+  const [pagesByChapter, setPagesByChapter] = useState(cachedPages);
+  const movies = catalog?.movies ?? [];
+  const series = catalog?.series ?? [];
+
+  // Library state lives on this device first (survives refresh and offline) and syncs to the server.
+  const [initialLibrary] = useState(loadLibrary);
+  const [myList, setMyList] = useState(initialLibrary.myList);
+  const [watchedMovies, setWatchedMovies] = useState(initialLibrary.watchedMovies);
+  const [continueWatching, setContinueWatching] = useState(initialLibrary.continueWatching);
+  const [continueReading, setContinueReading] = useState(initialLibrary.continueReading);
+  const [chapterStatuses, setChapterStatuses] = useState(initialLibrary.chapterStatuses);
+  // Downloads stay on the device (Phase 7 adds the server side).
+  const [movieDownloads, setMovieDownloads] = useState(() => storage.get("movieshelf.movieDownloads.v1", []));
+  const [mangaDownloads, setMangaDownloads] = useState(() => storage.get("movieshelf.mangaDownloads.v1", []));
 
   const [toasts, setToasts] = useState([]);
   const [previewItem, setPreviewItem] = useState(null);
@@ -93,13 +106,85 @@ export default function MovieShelf() {
     return () => window.removeEventListener("keydown", handleGlobalKey);
   }, [isOffline]);
 
+  useEffect(() => {
+    fetchCatalog().then(setCatalog, setCatalogError);
+  }, []);
+  const retryCatalog = () => {
+    setCatalogError(null);
+    fetchCatalog().then(setCatalog, setCatalogError);
+  };
+
+  // Keep library and downloads on the device.
+  useEffect(() => {
+    saveLibrary({ myList, watchedMovies, continueWatching, continueReading, chapterStatuses });
+  }, [myList, watchedMovies, continueWatching, continueReading, chapterStatuses]);
+  useEffect(() => storage.set("movieshelf.movieDownloads.v1", movieDownloads), [movieDownloads]);
+  useEffect(() => storage.set("movieshelf.mangaDownloads.v1", mangaDownloads), [mangaDownloads]);
+
+  // Sync: send queued changes, then adopt the server's copy (it applies the same rules). Skipped while changes are
+  // still queued, so nothing made offline is overwritten.
+  useEffect(() => {
+    setSyncPaused(isOffline);
+    if (isOffline) return undefined;
+    let cancelled = false;
+    flush()
+      .then(() => (pendingChanges() === 0 ? pullLibrary() : null))
+      .then((server) => {
+        if (!server || cancelled || pendingChanges() > 0) return;
+        setMyList(server.myList);
+        setWatchedMovies(server.watchedMovies);
+        setContinueWatching(server.continueWatching);
+        setContinueReading(server.continueReading);
+        setChapterStatuses(server.chapterStatuses);
+      })
+      .catch(() => {}); // stays local-only until the next sync
+    // The player saves every second; queued saves collapse and go out at most every 10 s (the server's limit).
+    const timer = setInterval(flush, 10_000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [isOffline]);
+
+  // Load a chapter's pages when the reader opens it.
+  useEffect(() => {
+    if (!route.startsWith("/read/") || !activeChapterId || pagesByChapter[activeChapterId] || isOffline) return;
+    fetchChapterPages(activeChapterId)
+      .then((pages) => setPagesByChapter((prev) => ({ ...prev, [activeChapterId]: pages })))
+      .catch(() => notify("Couldn't load this chapter's pages. Check your connection."));
+  }, [route, activeChapterId, pagesByChapter, isOffline]);
+
   const navigate = (nextRoute) => {
     setRoute(nextRoute);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
+  const setOffline = (next) => {
+    if (next === isOffline) return;
+    setIsOffline(next);
+    if (next) {
+      setPreviewItem(null);
+      navigate("/downloads");
+      notify("Switched to Offline Mode — Viewing Downloads");
+    } else {
+      notify("Reconnected to Online Mode");
+    }
+  };
+
+  // Follow the browser's real connection state (the header toggle still works as a manual override).
+  useEffect(() => {
+    const goOnline = () => setOffline(false);
+    const goOffline = () => setOffline(true);
+    window.addEventListener("online", goOnline);
+    window.addEventListener("offline", goOffline);
+    return () => {
+      window.removeEventListener("online", goOnline);
+      window.removeEventListener("offline", goOffline);
+    };
+  });
+
   const openMovieDetails = (movieId) => {
-    const mov = MOVIES_DATA.find((m) => m.id === movieId);
+    const mov = movies.find((m) => m.id === movieId);
     if (mov) {
       setPreviewItem({ kind: "movie", data: mov });
     }
@@ -112,6 +197,10 @@ export default function MovieShelf() {
 
   const playMovie = (movieId) => {
     setActiveMovieId(movieId);
+    // Tells the server playback started (it moves Plan to Watch → Watching), keeping any saved position.
+    const mov = movies.find((m) => m.id === movieId);
+    const saved = continueWatching.find((c) => c.movieId === movieId);
+    if (mov) queueMovieProgress(movieId, saved?.positionSec ?? 0, mov.durationSec, false);
     // Automatically update status to Watching (unless already Watched)
     setMyList((prev) =>
       prev.map((item) =>
@@ -126,7 +215,7 @@ export default function MovieShelf() {
   };
 
   const openSeriesDetails = (seriesId) => {
-    const ser = MANGA_SERIES.find((s) => s.id === seriesId);
+    const ser = series.find((s) => s.id === seriesId);
     if (ser) {
       setPreviewItem({ kind: "series", data: ser });
     }
@@ -138,10 +227,16 @@ export default function MovieShelf() {
   };
 
   const readChapter = (seriesId, chapterId) => {
-    const ser = MANGA_SERIES.find((s) => s.id === seriesId) || MANGA_SERIES[0];
+    const ser = series.find((s) => s.id === seriesId) || series[0];
+    if (!ser) return;
     const chId = chapterId || ser.chapters?.[0]?.id;
     setActiveSeriesId(ser.id);
     setActiveChapterId(chId);
+
+    // Tells the server the chapter was opened (In progress, series → Reading), keeping any saved page.
+    const ch = ser.chapters?.find((c) => c.id === chId);
+    const saved = continueReading.find((c) => c.seriesId === ser.id && c.chapterId === chId);
+    if (ch) queueReadingProgress(ser.id, chId, saved?.pageIndex ?? 1, ch.pageCount || 1, saved?.mode ?? "vertical");
 
     // Automatically mark chapter In progress (if Unread) and series as Reading
     setChapterStatuses((prev) => ({
@@ -176,13 +271,14 @@ export default function MovieShelf() {
     const exists = isInList(mediaType, mediaId);
     const title =
       mediaType === "movie"
-        ? MOVIES_DATA.find((m) => m.id === mediaId)?.title
-        : MANGA_SERIES.find((s) => s.id === mediaId)?.title;
+        ? movies.find((m) => m.id === mediaId)?.title
+        : series.find((s) => s.id === mediaId)?.title;
 
     if (exists) {
       setMyList((prev) =>
         prev.filter((i) => !(i.mediaType === mediaType && i.mediaId === mediaId))
       );
+      queueRemoveFromList(mediaType, mediaId);
       notify(`Removed "${title}" from My List`);
     } else {
       seqRef.current += 1;
@@ -195,7 +291,7 @@ export default function MovieShelf() {
         else if (continueWatching.some((c) => c.movieId === mediaId))
           autoInitialStatus = "Watching";
       } else {
-        const ser = MANGA_SERIES.find((s) => s.id === mediaId);
+        const ser = series.find((s) => s.id === mediaId);
         const allChRead =
           ser?.chapters?.length > 0 &&
           ser.chapters.every(
@@ -220,10 +316,11 @@ export default function MovieShelf() {
           mediaType,
           mediaId,
           status: autoInitialStatus,
-          addedAt: "Today",
+          addedAt: new Date().toISOString(),
         },
         ...prev,
       ]);
+      queueAddToList(mediaType, mediaId);
       notify(`Added "${title}" to My List (${autoInitialStatus})`);
     }
   };
@@ -235,6 +332,7 @@ export default function MovieShelf() {
   // Continue Watching & Reading helpers — Automatically drive status transitions
   const saveMovieProgress = (movieId, positionSec, durationSec) => {
     const isCompleted = positionSec >= durationSec * 0.9 || positionSec >= durationSec;
+    queueMovieProgress(movieId, positionSec, durationSec, isCompleted);
 
     if (isCompleted) {
       setWatchedMovies((prev) =>
@@ -275,13 +373,17 @@ export default function MovieShelf() {
 
   const removeContinueWatching = (movieId) => {
     setContinueWatching((prev) => prev.filter((p) => p.movieId !== movieId));
+    queueDismissMovie(movieId);
     notify("Removed from Continue Watching");
   };
 
   const updateReadingProgress = (seriesId, chapterId, pageIndex, totalPages, mode) => {
-    const ser = MANGA_SERIES.find((s) => s.id === seriesId);
+    const ser = series.find((s) => s.id === seriesId);
     const ch = ser?.chapters?.find((c) => c.id === chapterId);
-    const nextChStatus = pageIndex >= totalPages ? "Read" : "In progress";
+    queueReadingProgress(seriesId, chapterId, pageIndex, totalPages, mode);
+    // Read stays Read when re-reading, matching the server's rule.
+    const nextChStatus =
+      pageIndex >= totalPages || chapterStatuses[chapterId] === "Read" ? "Read" : "In progress";
 
     const nextStatuses = {
       ...chapterStatuses,
@@ -326,6 +428,7 @@ export default function MovieShelf() {
 
   const removeContinueReading = (seriesId) => {
     setContinueReading((prev) => prev.filter((p) => p.seriesId !== seriesId));
+    queueDismissSeries(seriesId);
     notify("Removed from Continue Reading");
   };
 
@@ -399,16 +502,40 @@ export default function MovieShelf() {
   };
 
   const activeMovie =
-    MOVIES_DATA.find((m) => m.id === activeMovieId) || MOVIES_DATA[0];
+    movies.find((m) => m.id === activeMovieId) || movies[0];
   const activeSeries =
-    MANGA_SERIES.find((s) => s.id === activeSeriesId) || MANGA_SERIES[0];
-  const activeChapter =
-    activeSeries.chapters?.find((c) => c.id === activeChapterId) ||
-    activeSeries.chapters?.[0];
+    series.find((s) => s.id === activeSeriesId) || series[0];
+  const chapterMeta =
+    activeSeries?.chapters?.find((c) => c.id === activeChapterId) ||
+    activeSeries?.chapters?.[0];
+  // Pages load when the reader opens the chapter; until then the reader shows its placeholder.
+  const activeChapter = chapterMeta && { ...chapterMeta, pages: pagesByChapter[chapterMeta.id] };
 
   const activeWatchProgress = continueWatching.find(
     (c) => c.movieId === activeMovie?.id
   );
+  const activeReadProgress = continueReading.find(
+    (c) => c.seriesId === activeSeries?.id && c.chapterId === activeChapter?.id
+  );
+
+  if (!catalog) {
+    return (
+      <div className="ms-app">
+        <main className="ms-main ms-container" style={{ paddingTop: "120px", textAlign: "center" }} aria-live="polite">
+          {catalogError ? (
+            <>
+              <p>Couldn&apos;t load the catalog. Check your connection and try again.</p>
+              <button type="button" className="ms-btn ms-btn-primary" onClick={retryCatalog}>
+                Try again
+              </button>
+            </>
+          ) : (
+            <p>Loading MovieShelf…</p>
+          )}
+        </main>
+      </div>
+    );
+  }
 
   // Route View Switcher
   const renderView = () => {
@@ -421,8 +548,8 @@ export default function MovieShelf() {
         <DownloadsPage
           movieDownloads={movieDownloads}
           mangaDownloads={mangaDownloads}
-          movies={MOVIES_DATA}
-          series={MANGA_SERIES}
+          movies={movies}
+          series={series}
           isOffline={isOffline}
           onOpenLocalPlayer={openLocalPlayer}
           onRemoveMovieDownload={(id) => {
@@ -441,8 +568,8 @@ export default function MovieShelf() {
     if (route === "/") {
       return (
         <HomePage
-          movies={MOVIES_DATA}
-          series={MANGA_SERIES}
+          movies={movies}
+          series={series}
           continueWatching={continueWatching}
           continueReading={continueReading}
           onNavigate={navigate}
@@ -469,7 +596,7 @@ export default function MovieShelf() {
     if (route === "/movies") {
       return (
         <MoviesHomePage
-          movies={MOVIES_DATA}
+          movies={movies}
           continueWatching={continueWatching}
           onNavigate={navigate}
           onOpenMovieDetails={openMovieDetails}
@@ -484,7 +611,7 @@ export default function MovieShelf() {
     if (route === "/movies/browse") {
       return (
         <BrowseMoviesPage
-          movies={MOVIES_DATA}
+          movies={movies}
           onOpenMovieDetails={openMovieDetails}
           onPlayMovie={playMovie}
           onToggleList={toggleList}
@@ -497,7 +624,7 @@ export default function MovieShelf() {
       return (
         <MovieDetailsPage
           movie={activeMovie}
-          allMovies={MOVIES_DATA}
+          allMovies={movies}
           region={region}
           onRegionChange={setRegion}
           onPlayMovie={playMovie}
@@ -514,7 +641,7 @@ export default function MovieShelf() {
       return (
         <MoviePlayerPage
           movie={activeMovie}
-          initialPositionSec={activeWatchProgress?.positionSec ?? 24}
+          initialPositionSec={activeWatchProgress?.positionSec ?? 0}
           onBack={() => openFullMoviePage(activeMovie.id)}
           onSaveProgress={saveMovieProgress}
           onNotify={notify}
@@ -534,8 +661,8 @@ export default function MovieShelf() {
           isLocalMode={true}
           localFileName={localPlayerFile}
           onSelectLocalFile={() => {
-            const idx = MOVIES_DATA.findIndex((m) => m.id === activeMovie.id);
-            const nextMovie = MOVIES_DATA[(idx + 1) % MOVIES_DATA.length];
+            const idx = movies.findIndex((m) => m.id === activeMovie.id);
+            const nextMovie = movies[(idx + 1) % movies.length];
             setActiveMovieId(nextMovie.id);
             setLocalPlayerFile(
               `${nextMovie.title.replace(/\s+/g, "_")}_1080p_Local.mp4`
@@ -549,7 +676,7 @@ export default function MovieShelf() {
     if (route === "/manga") {
       return (
         <MangaHomePage
-          series={MANGA_SERIES}
+          series={series}
           continueReading={continueReading}
           onNavigate={navigate}
           onOpenSeriesDetails={openSeriesDetails}
@@ -564,7 +691,7 @@ export default function MovieShelf() {
     if (route === "/manga/browse") {
       return (
         <BrowseMangaPage
-          series={MANGA_SERIES}
+          series={series}
           onOpenSeriesDetails={openSeriesDetails}
           onReadChapter={readChapter}
           onToggleList={toggleList}
@@ -577,7 +704,7 @@ export default function MovieShelf() {
       return (
         <SeriesDetailsPage
           seriesItem={activeSeries}
-          allSeries={MANGA_SERIES}
+          allSeries={series}
           chapterStatuses={chapterStatuses}
           onReadChapter={readChapter}
           onDownloadChapter={handleDownloadChapter}
@@ -593,6 +720,7 @@ export default function MovieShelf() {
         <ChapterReaderPage
           seriesItem={activeSeries}
           chapter={activeChapter}
+          initialPage={activeReadProgress?.pageIndex ?? 1}
           onSelectChapter={readChapter}
           onBackToSeries={() =>
             isOffline ? navigate("/downloads") : openFullSeriesPage(activeSeries.id)
@@ -618,8 +746,8 @@ export default function MovieShelf() {
           : searchScope;
       return (
         <SearchResultsPage
-          movies={MOVIES_DATA}
-          series={MANGA_SERIES}
+          movies={movies}
+          series={series}
           searchQuery={searchQuery}
           onSearchQueryChange={setSearchQuery}
           initialScope={initialScope}
@@ -637,8 +765,8 @@ export default function MovieShelf() {
       return (
         <MyListPage
           myList={myList}
-          movies={MOVIES_DATA}
-          series={MANGA_SERIES}
+          movies={movies}
+          series={series}
           continueWatching={continueWatching}
           continueReading={continueReading}
           onRemoveFromList={removeFromList}
@@ -656,8 +784,8 @@ export default function MovieShelf() {
         <DownloadsPage
           movieDownloads={movieDownloads}
           mangaDownloads={mangaDownloads}
-          movies={MOVIES_DATA}
-          series={MANGA_SERIES}
+          movies={movies}
+          series={series}
           isOffline={isOffline}
           onOpenLocalPlayer={openLocalPlayer}
           onRemoveMovieDownload={(id) => {
@@ -702,20 +830,10 @@ export default function MovieShelf() {
           myListCount={myList.length}
           downloadsCount={movieDownloads.length + mangaDownloads.length}
           isOffline={isOffline}
-          onToggleOffline={() => {
-            const next = !isOffline;
-            setIsOffline(next);
-            if (next) {
-              setPreviewItem(null);
-              navigate("/downloads");
-              notify("Switched to Offline Mode — Viewing Downloads");
-            } else {
-              notify("Reconnected to Online Mode");
-            }
-          }}
+          onToggleOffline={() => setOffline(!isOffline)}
           onOpenSearchPage={() => navigate("/search")}
-          movies={MOVIES_DATA}
-          series={MANGA_SERIES}
+          movies={movies}
+          series={series}
           searchQuery={searchQuery}
           onSearchQueryChange={setSearchQuery}
           onSubmitSearch={(q) => {
@@ -777,8 +895,8 @@ export default function MovieShelf() {
         }
         region={region}
         onRegionChange={setRegion}
-        allMovies={MOVIES_DATA}
-        allSeries={MANGA_SERIES}
+        allMovies={movies}
+        allSeries={series}
         chapterStatuses={chapterStatuses}
         onSelectPreviewItem={setPreviewItem}
       />
