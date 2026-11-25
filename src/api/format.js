@@ -61,3 +61,9 @@ export function sizeLabel(availability) {
   if (bytes) return bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${Math.round(bytes / 1e6)} MB`;
   return availability?.canStream ? "Stream Only" : "Theatrical Window";
 }
+
+/** YouTube video id from a watch / share / embed URL, or null (anything else is never embedded). */
+export function youtubeId(url) {
+  const m = /^https:\/\/(?:www\.)?(?:youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/)|youtu\.be\/)([\w-]{11})(?:[?&#]|$)/.exec(url || "");
+  return m ? m[1] : null;
+}

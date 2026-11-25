@@ -5,6 +5,7 @@ import { catalogRoutes } from "./catalog/routes.ts";
 import type { Db } from "./db/client.ts";
 import { libraryRoutes } from "./library/routes.ts";
 import { subtitleRoutes } from "./subtitles/routes.ts";
+import type { Tmdb } from "./tmdb/client.ts";
 
 export interface AppOptions {
   logger?: boolean;
@@ -12,12 +13,14 @@ export interface AppOptions {
   /** Catalog and library routes are only mounted when a database is given (unit tests run without one). */
   db?: Db;
   cookieSecure?: boolean;
+  /** TMDB client; when set, Where to Watch uses live TMDB/JustWatch data. */
+  tmdb?: Tmdb;
 }
 
 // Accept a caller's request ID only if it's safe to log and echo back.
 const SAFE_REQUEST_ID = /^[A-Za-z0-9._-]{1,64}$/;
 
-export function buildApp({ logger = false, corsOrigins = [], db, cookieSecure = false }: AppOptions = {}) {
+export function buildApp({ logger = false, corsOrigins = [], db, cookieSecure = false, tmdb }: AppOptions = {}) {
   const app = Fastify({
     logger,
     requestIdHeader: false,
@@ -64,7 +67,7 @@ export function buildApp({ logger = false, corsOrigins = [], db, cookieSecure = 
   }
 
   if (db) {
-    app.register(catalogRoutes, { db });
+    app.register(catalogRoutes, { db, tmdb });
     app.register(libraryRoutes, { db, cookieSecure });
     app.register(subtitleRoutes, { db });
   }

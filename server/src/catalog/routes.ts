@@ -3,6 +3,10 @@ import type { Db } from "../db/client.ts";
 import * as q from "./queries.ts";
 import { search, suggest, type SearchParams } from "./search.ts";
 import { knownRegion, resolveRegion } from "../region.ts";
+import { eq } from "drizzle-orm";
+import { movies } from "../db/schema.ts";
+import type { Tmdb } from "../tmdb/client.ts";
+import { TMDB_ATTRIBUTION, tmdbProvidersFor } from "../tmdb/movies.ts";
 
 const idParam = (prefix: string) => ({
   type: "object",
@@ -24,7 +28,7 @@ const searchText = { type: "string", maxLength: 100, pattern: "\\S" };
 const notFound = (reply: FastifyReply, what: string) =>
   reply.status(404).send({ error: { code: "NOT_FOUND", message: `${what} not found` } });
 
-export async function catalogRoutes(app: FastifyInstance, { db }: { db: Db }) {
+export async function catalogRoutes(app: FastifyInstance, { db, tmdb }: { db: Db; tmdb?: Tmdb }) {
   // Movie availability depends on the viewer's region (saved, then CDN country, then PH).
   const regionOf = async (req: FastifyRequest) => (await resolveRegion(db, req)).region;
 
@@ -88,7 +92,23 @@ export async function catalogRoutes(app: FastifyInstance, { db }: { db: Db }) {
       }
       const { region, source } = await resolveRegion(db, req, explicit);
       const items = await q.getMovieProviders(db, req.params.id, region);
-      return items ? { region, regionSource: source, items } : notFound(reply, "Movie");
+      if (!items) return notFound(reply, "Movie");
+      const base = { region, regionSource: source };
+
+      // BE-26: live TMDB/JustWatch data when a key is set and TMDB knows this title; the catalog's own list otherwise.
+      if (tmdb) {
+        const [movie] = await db
+          .select({ tmdbId: movies.tmdbId, title: movies.title, originalTitle: movies.originalTitle })
+          .from(movies)
+          .where(eq(movies.id, req.params.id));
+        try {
+          const live = await tmdbProvidersFor(tmdb, movie, region);
+          if (live) return { ...base, source: "tmdb", attribution: TMDB_ATTRIBUTION, items: live };
+        } catch (err) {
+          req.log.warn({ err }, "TMDB providers lookup failed; using catalog data");
+        }
+      }
+      return { ...base, source: "catalog", attribution: null, items };
     },
   );
 

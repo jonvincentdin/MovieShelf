@@ -96,10 +96,17 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [region, regionSource, items]
+                required: [region, regionSource, source, attribution, items]
                 properties:
                   region: { type: string }
                   regionSource: { $ref: "#/components/schemas/RegionSource" }
+                  source:
+                    type: string
+                    enum: [tmdb, catalog]
+                    description: "tmdb = live JustWatch data via TMDB (needs TMDB_API_KEY, cached 24 h); catalog = MovieShelf's own list"
+                  attribution:
+                    type: [string, "null"]
+                    description: "Must be shown with TMDB data (TMDB and JustWatch terms)"
                   items:
                     type: array
                     items:

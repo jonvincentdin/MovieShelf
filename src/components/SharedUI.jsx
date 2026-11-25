@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { youtubeId } from "../api/format.js";
 import {
   Play,
   Plus,
@@ -15,6 +16,21 @@ import {
   Sparkles,
   Download,
 } from "lucide-react";
+
+/** Official trailer (from TMDB) over the artwork, when the movie has one; renders nothing otherwise. */
+export function TrailerVideo({ trailer, title }) {
+  const id = youtubeId(trailer?.videoUrl);
+  if (!id) return null;
+  return (
+    <iframe
+      src={`https://www.youtube-nocookie.com/embed/${id}?autoplay=1&rel=0`}
+      title={trailer.title || `${title} — Official Trailer`}
+      allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
+      allowFullScreen
+      style={{ position: "absolute", inset: 0, width: "100%", height: "100%", border: 0, zIndex: 2 }}
+    />
+  );
+}
 
 /**
  * Rich Multi-Layer Geometric Horizon Vector Artwork
@@ -1476,6 +1492,7 @@ export function ContentPreviewModal({
                 }}
               >
                 <HorizonArtwork palette={data.palette} aspect="wide" />
+                <TrailerVideo trailer={data.trailer} title={data.title} />
                 <div
                   style={{
                     position: "absolute",

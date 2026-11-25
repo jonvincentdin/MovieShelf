@@ -14,7 +14,8 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:check": "drizzle-kit check",
-    "db:seed": "node --env-file-if-exists=.env src/db/seed-run.ts"
+    "db:seed": "node --env-file-if-exists=.env src/db/seed-run.ts",
+    "tmdb:import": "node --env-file-if-exists=.env src/tmdb/import-run.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

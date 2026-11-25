@@ -5,6 +5,8 @@ export interface Config {
   databaseUrl: string;
   /** Marks the device cookie Secure. On whenever NODE_ENV=production (the site must then be served over HTTPS). */
   cookieSecure: boolean;
+  /** Optional TMDB key (v3 key or v4 read token). Without it, Where to Watch uses the catalog's own data. */
+  tmdbApiKey?: string;
 }
 
 // Fails fast at startup instead of on the first request.
@@ -30,5 +32,6 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     corsOrigins,
     databaseUrl,
     cookieSecure: env.NODE_ENV === "production",
+    tmdbApiKey: env.TMDB_API_KEY?.trim() || undefined,
   };
 }

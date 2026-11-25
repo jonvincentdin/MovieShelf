@@ -25,6 +25,7 @@ import {
   ContinueWatchingCard,
   Modal,
   StateFeedbackBox,
+  TrailerVideo,
 } from "./SharedUI.jsx";
 import {
   MOVIE_GENRES,
@@ -949,6 +950,7 @@ export function MovieDetailsPage({
           }}
         >
           <HorizonArtwork palette={movie.palette} aspect="wide" />
+          <TrailerVideo trailer={movie.trailer} title={movie.title} />
           <div
             style={{
               position: "absolute",
