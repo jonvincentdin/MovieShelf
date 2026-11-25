@@ -1,7 +1,17 @@
 // Pure conversion of the frontend mock catalog (src/data/*) into database rows.
 // Throws on anything it can't convert, so a bad mock edit fails the seed instead of storing junk.
 
-import { PROVIDER_TYPES, type Availability, type MediaType, type Palette, type ProviderType, type Trailer } from "./schema.ts";
+import { cuesToSrt, cuesToVtt, type Cue } from "../subtitles/format.ts";
+import {
+  PROVIDER_TYPES,
+  SUBTITLE_FORMATS,
+  type Availability,
+  type MediaType,
+  type Palette,
+  type ProviderType,
+  type SubtitleFormat,
+  type Trailer,
+} from "./schema.ts";
 
 /** "1h 15m" → 75, "2h" → 120, "45m" → 45 */
 export function parseRuntime(label: string): number {
@@ -99,8 +109,21 @@ interface MockSeries {
   }[];
 }
 
+interface MockSubtitle {
+  id: string;
+  movieId: string; // "ALL" = demo track shown for every movie
+  language: string;
+  langCode: string;
+  releaseName: string;
+  format: string;
+  fps?: string;
+  hearingImpaired?: boolean;
+  cues: Cue[];
+}
+
 export interface MockCatalog {
   movies: MockMovie[];
+  subtitles?: MockSubtitle[];
   movieGenres: string[];
   languages: { code: string; label: string }[];
   regions: { code: string; name: string }[];
@@ -181,6 +204,28 @@ export function buildSeedRows(mock: MockCatalog) {
     }),
   );
 
+  // BE-32: "ALL" demo tracks become a real per-movie copy, so the data model only has tracks that belong to a movie.
+  const movieIdSet = new Set(mock.movies.map((m) => m.id));
+  const subtitleTracks = (mock.subtitles ?? []).flatMap((s) => {
+    if (!(SUBTITLE_FORMATS as readonly string[]).includes(s.format)) throw new Error(`${s.id}: bad format ${s.format}`);
+    if (s.movieId !== "ALL" && !movieIdSet.has(s.movieId)) throw new Error(`${s.id}: unknown movie ${s.movieId}`);
+    const format = s.format as SubtitleFormat;
+    const row = (movieId: string, id: string) => ({
+      id,
+      movieId,
+      language: s.language,
+      langCode: s.langCode,
+      releaseName: s.releaseName,
+      format,
+      fps: s.fps ?? null,
+      hearingImpaired: s.hearingImpaired ?? false,
+      content: format === "SRT" ? cuesToSrt(s.cues) : cuesToVtt(s.cues),
+    });
+    return s.movieId === "ALL"
+      ? mock.movies.map((m) => row(m.id, `${s.id}-${m.id.replace(/^mov-/, "")}`))
+      : [row(s.movieId, s.id)];
+  });
+
   const genreRows = (mediaType: MediaType, names: string[]) =>
     [...new Set(names)].map((name) => ({ mediaType, name }));
   const genres = [
@@ -252,6 +297,7 @@ export function buildSeedRows(mock: MockCatalog) {
     movieGenres,
     movieCast,
     movieProviders,
+    subtitleTracks,
     series,
     seriesAltTitles,
     seriesGenres,

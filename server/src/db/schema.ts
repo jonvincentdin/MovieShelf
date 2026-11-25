@@ -1,5 +1,6 @@
 import {
   date,
+  index,
   integer,
   jsonb,
   pgTable,
@@ -206,6 +207,31 @@ export const movieProviders = pgTable(
     position: integer("position").notNull(),
   },
   (t) => [primaryKey({ columns: [t.movieId, t.regionCode, t.providerId] })],
+);
+
+// ---- Subtitles (BE-29, BE-30) ----
+
+export const SUBTITLE_FORMATS = ["SRT", "WebVTT"] as const;
+export type SubtitleFormat = (typeof SUBTITLE_FORMATS)[number];
+
+// The file is stored as uploaded; SRT is converted to WebVTT when served so the player handles one format.
+export const subtitleTracks = pgTable(
+  "subtitle_tracks",
+  {
+    id: text("id").primaryKey(),
+    movieId: text("movie_id")
+      .notNull()
+      .references(() => movies.id, { onDelete: "cascade" }),
+    language: text("language").notNull(),
+    langCode: text("lang_code").notNull(),
+    releaseName: text("release_name").notNull(),
+    format: text("format").$type<SubtitleFormat>().notNull(),
+    fps: text("fps"),
+    hearingImpaired: boolean("hearing_impaired").notNull().default(false),
+    content: text("content").notNull(),
+    ...timestamps,
+  },
+  (t) => [index("subtitle_tracks_movie_id_idx").on(t.movieId)],
 );
 
 // ---- Curation ----

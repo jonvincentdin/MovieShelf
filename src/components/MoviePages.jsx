@@ -29,8 +29,9 @@ import {
 import {
   MOVIE_GENRES,
   MOVIE_LANGUAGES,
-  SUBTITLE_CATALOG,
+  SUBTITLE_CATALOG, // sample cues for the demo "import local file" buttons only
 } from "../data/moviesData.js";
+import { fetchSubtitleCues, fetchSubtitleTracks } from "../api/subtitles.js";
 
 /**
  * Movies Home Page (/movies) — (FE-15)
@@ -1006,7 +1007,7 @@ export function MoviePlayerPage({
   const [volume, setVolume] = useState(85);
   const [isMuted, setIsMuted] = useState(false);
   const [captionsEnabled, setCaptionsEnabled] = useState(true);
-  const [activeTrackId, setActiveTrackId] = useState("sub-en-horizon-web");
+  const [activeTrackId, setActiveTrackId] = useState(null);
   const [timingOffset, setTimingOffset] = useState(0.0);
   const [playbackSpeed, setPlaybackSpeed] = useState(1.0);
   const [captionSize, setCaptionSize] = useState("medium"); // small | medium | large | xlarge
@@ -1021,9 +1022,33 @@ export function MoviePlayerPage({
   const [importedTracks, setImportedTracks] = useState([]);
   const trackCounterRef = useRef(1);
 
-  const allTracks = [...SUBTITLE_CATALOG, ...importedTracks];
-  const activeTrack =
-    allTracks.find((t) => t.id === activeTrackId) || SUBTITLE_CATALOG[0];
+  // Tracks for this movie come from the API (BE-29); cues load when a track is picked (BE-30).
+  const [serverTracks, setServerTracks] = useState([]);
+  const [cuesByTrack, setCuesByTrack] = useState({});
+  useEffect(() => {
+    if (!movie?.id) return;
+    let cancelled = false;
+    fetchSubtitleTracks(movie.id)
+      .then((items) => !cancelled && setServerTracks(items))
+      .catch(() => !cancelled && setServerTracks([]));
+    return () => {
+      cancelled = true;
+    };
+  }, [movie?.id]);
+
+  const allTracks = [
+    ...serverTracks.map((t) => ({ ...t, cues: cuesByTrack[t.id] })),
+    ...importedTracks,
+  ];
+  const activeTrack = allTracks.find((t) => t.id === activeTrackId) || allTracks[0];
+
+  const activeServerTrackId = activeTrack && !activeTrack.cues ? activeTrack.id : null;
+  useEffect(() => {
+    if (!activeServerTrackId) return;
+    fetchSubtitleCues(activeServerTrackId)
+      .then((cues) => setCuesByTrack((prev) => ({ ...prev, [activeServerTrackId]: cues })))
+      .catch(() => setCuesByTrack((prev) => ({ ...prev, [activeServerTrackId]: [] }))); // offline, not cached: no captions
+  }, [activeServerTrackId]);
 
   const captionFontSizeMap = {
     small: "0.9rem",
@@ -1903,7 +1928,7 @@ export function MoviePlayerPage({
               <select
                 className="ms-select"
                 style={{ flex: 1, minWidth: "200px" }}
-                value={activeTrackId}
+                value={activeTrack?.id ?? ""}
                 onChange={(e) => {
                   setActiveTrackId(e.target.value);
                   setCaptionsEnabled(true);

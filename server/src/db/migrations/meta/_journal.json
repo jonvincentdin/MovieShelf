@@ -36,6 +36,13 @@
       "when": 1795602616256,
       "tag": "0004_providers",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1795602752834,
+      "tag": "0005_subtitles",
+      "breakpoints": true
     }
   ]
 }

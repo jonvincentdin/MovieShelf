@@ -1,6 +1,6 @@
 import { getTableColumns, inArray, sql, type SQL } from "drizzle-orm";
 import type { PgTable } from "drizzle-orm/pg-core";
-import { MOVIES_DATA, MOVIE_GENRES, MOVIE_LANGUAGES, REGIONS } from "../../../src/data/moviesData.js";
+import { MOVIES_DATA, MOVIE_GENRES, MOVIE_LANGUAGES, REGIONS, SUBTITLE_CATALOG } from "../../../src/data/moviesData.js";
 import { MANGA_GENRES, MANGA_SERIES } from "../../../src/data/mangaData.js";
 import type { Db } from "./client.ts";
 import * as t from "./schema.ts";
@@ -8,6 +8,7 @@ import { buildSeedRows, SEEDED_SLOTS, type MockCatalog } from "./transform.ts";
 
 export const MOCK_CATALOG = {
   movies: MOVIES_DATA,
+  subtitles: SUBTITLE_CATALOG,
   movieGenres: MOVIE_GENRES,
   languages: MOVIE_LANGUAGES,
   regions: REGIONS,
@@ -69,6 +70,12 @@ export async function seed(db: Db, mock: MockCatalog = MOCK_CATALOG) {
     await tx.insert(t.movieCast).values(rows.movieCast);
     await tx.delete(t.movieProviders).where(inArray(t.movieProviders.movieId, movieIds));
     if (rows.movieProviders.length) await tx.insert(t.movieProviders).values(rows.movieProviders);
+    if (rows.subtitleTracks.length) {
+      await tx.insert(t.subtitleTracks).values(rows.subtitleTracks).onConflictDoUpdate({
+        target: t.subtitleTracks.id,
+        set: updateAll(t.subtitleTracks, ["id"]),
+      });
+    }
 
     const seriesIds = rows.series.map((s) => s.id);
     await tx.insert(t.series).values(rows.series).onConflictDoUpdate({
