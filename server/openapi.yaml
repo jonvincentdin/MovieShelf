@@ -79,6 +79,66 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
 
+  /api/movies/{id}/providers:
+    get:
+      summary: Where to Watch for one movie in one region
+      description: |
+        Region: `?region=` if given, else the device's saved region, else the CDN's country header
+        (cf-ipcountry, x-vercel-ip-country, cloudfront-viewer-country), else PH. Empty when no provider is listed.
+      operationId: getMovieProviders
+      parameters:
+        - $ref: "#/components/parameters/MovieId"
+        - { name: region, in: query, schema: { type: string, pattern: "^[A-Z]{2}$", examples: [PH] } }
+      responses:
+        "200":
+          description: Providers in display order
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [region, regionSource, items]
+                properties:
+                  region: { type: string }
+                  regionSource: { $ref: "#/components/schemas/RegionSource" }
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, name, type, url]
+                      properties:
+                        id: { type: string }
+                        name: { type: string }
+                        type: { type: string, enum: [Subscription, Free, Rent, Buy] }
+                        price: { type: [string, "null"], examples: ["₱149"] }
+                        quality: { type: [string, "null"], examples: [4K HDR] }
+                        url: { type: string }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /api/me/region:
+    get:
+      summary: This device's region for Where to Watch, and where it came from
+      operationId: getRegion
+      security: [{ device: [] }, {}]
+      responses:
+        "200": { $ref: "#/components/responses/Region" }
+    put:
+      summary: Save this device's region
+      operationId: setRegion
+      security: [{ device: [] }, {}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [region]
+              properties:
+                region: { type: string, pattern: "^[A-Z]{2}$", description: "Must be one of /api/meta/regions" }
+      responses:
+        "200": { $ref: "#/components/responses/Region" }
+        "400": { $ref: "#/components/responses/Error" }
+
   /api/series:
     get:
       summary: Browse series (the Browse Manga page filters)
@@ -584,6 +644,10 @@ components:
       schema:
         type: string
   schemas:
+    RegionSource:
+      type: string
+      enum: [query, saved, header, default]
+
     ClientTime:
       type: string
       format: date-time
@@ -706,6 +770,7 @@ components:
             duration: { type: string }
             aspect: { type: string }
             summary: { type: string }
+            videoUrl: { type: [string, "null"], description: "Playable trailer (YouTube or MP4 URL). Null until real trailers exist." }
         updatedAt: { type: string, format: date-time }
 
     CuratedMovie:
@@ -790,6 +855,16 @@ components:
               type: string
               description: Human-readable message. Internal errors never expose details.
   responses:
+    Region:
+      description: Region
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [region, source]
+            properties:
+              region: { type: string, examples: [PH] }
+              source: { $ref: "#/components/schemas/RegionSource" }
     LibraryItem:
       description: Library item
       content:

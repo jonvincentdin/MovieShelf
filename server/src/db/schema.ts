@@ -32,7 +32,12 @@ export interface Trailer {
   duration: string;
   aspect: string;
   summary: string;
+  /** BE-28: a playable trailer (e.g. a YouTube watch URL or an MP4). Absent until real trailers are added. */
+  videoUrl?: string | null;
 }
+
+export const PROVIDER_TYPES = ["Subscription", "Free", "Rent", "Buy"] as const;
+export type ProviderType = (typeof PROVIDER_TYPES)[number];
 
 const timestamps = {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -181,6 +186,28 @@ export const chapterPages = pgTable(
   (t) => [primaryKey({ columns: [t.chapterId, t.pageNumber] })],
 );
 
+// ---- Where to Watch (BE-25) ----
+
+export const movieProviders = pgTable(
+  "movie_providers",
+  {
+    movieId: text("movie_id")
+      .notNull()
+      .references(() => movies.id, { onDelete: "cascade" }),
+    regionCode: text("region_code")
+      .notNull()
+      .references(() => regions.code),
+    providerId: text("provider_id").notNull(),
+    name: text("name").notNull(),
+    type: text("type").$type<ProviderType>().notNull(),
+    price: text("price"), // display price in the region's currency, e.g. "₱149"
+    quality: text("quality"),
+    url: text("url").notNull(),
+    position: integer("position").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.movieId, t.regionCode, t.providerId] })],
+);
+
 // ---- Curation ----
 
 // Editorial placement (hero, trending order, rails) kept off the title rows so it can change without editing titles.
@@ -204,6 +231,8 @@ export const featuredSlots = pgTable(
 export const devices = pgTable("devices", {
   id: uuid("id").primaryKey().defaultRandom(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  // BE-27: the region the user picked for Where to Watch; null = not chosen yet.
+  region: text("region").references(() => regions.code),
 });
 
 const deviceId = () =>

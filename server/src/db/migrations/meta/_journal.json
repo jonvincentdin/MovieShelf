@@ -29,6 +29,13 @@
       "when": 1795549376360,
       "tag": "0003_library",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1795602616256,
+      "tag": "0004_providers",
+      "breakpoints": true
     }
   ]
 }

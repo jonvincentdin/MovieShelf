@@ -55,6 +55,10 @@ export async function createDevice(db: Db) {
   return row.id;
 }
 
+export async function setDeviceRegion(db: Db, id: string, region: string) {
+  await db.update(devices).set({ region }).where(eq(devices.id, id));
+}
+
 // ---- My List (BE-19) ----
 
 const itemDto = (r: typeof libraryItems.$inferSelect) => ({

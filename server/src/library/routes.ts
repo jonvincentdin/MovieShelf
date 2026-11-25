@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Db } from "../db/client.ts";
 import type { MediaType } from "../db/schema.ts";
+import { knownRegion, resolveRegion } from "../region.ts";
 import { changeTime } from "./rules.ts";
 import * as store from "./store.ts";
 
@@ -68,6 +69,33 @@ export async function libraryRoutes(app: FastifyInstance, { db, cookieSecure }: 
   const isRefusal = (r: object): r is store.Refusal => "refused" in r;
   const gone = (reply: FastifyReply, what: string) =>
     reply.status(404).send({ error: { code: "NOT_FOUND", message: `${what} not found` } });
+
+  // Region for Where to Watch (BE-27)
+  app.get("/api/me/region", async (req) => {
+    const { region, source } = await resolveRegion(db, req);
+    return { region, source };
+  });
+
+  app.put<{ Body: { region: string } }>(
+    "/api/me/region",
+    {
+      schema: {
+        body: {
+          type: "object",
+          required: ["region"],
+          properties: { region: { type: "string", pattern: "^[A-Z]{2}$" } },
+        },
+      },
+    },
+    async (req, reply) => {
+      if (!(await knownRegion(db, req.body.region))) {
+        return reply.status(400).send({ error: { code: "VALIDATION_ERROR", message: `Unknown region ${req.body.region}` } });
+      }
+      const deviceId = await device(req, reply);
+      await store.setDeviceRegion(db, deviceId, req.body.region);
+      return { region: req.body.region, source: "saved" };
+    },
+  );
 
   // My List
   app.get("/api/library", async (req) => {
