@@ -1,7 +1,7 @@
 // Pure conversion of the frontend mock catalog (src/data/*) into database rows.
 // Throws on anything it can't convert, so a bad mock edit fails the seed instead of storing junk.
 
-import type { Availability, MediaType, Palette, Trailer } from "./schema.ts";
+import { PROVIDER_TYPES, type Availability, type MediaType, type Palette, type ProviderType, type Trailer } from "./schema.ts";
 
 /** "1h 15m" → 75, "2h" → 120, "45m" → 45 */
 export function parseRuntime(label: string): number {
@@ -59,6 +59,7 @@ interface MockMovie {
   palette?: Palette;
   availability?: Omit<Availability, "sizeBytes"> & { sizeLabel: string };
   trailer?: Trailer;
+  providersByRegion?: Record<string, { id: string; name: string; type: string; price?: string; quality?: string; url: string }[]>;
   trendingRank: number;
   isRecentRelease?: boolean;
 }
@@ -159,6 +160,27 @@ export function buildSeedRows(mock: MockCatalog) {
     })),
   );
 
+  const regionCodes = new Set(mock.regions.map((r) => r.code));
+  const movieProviders = mock.movies.flatMap((m) =>
+    Object.entries(m.providersByRegion ?? {}).flatMap(([regionCode, list]) => {
+      if (!regionCodes.has(regionCode)) throw new Error(`${m.id}: unknown provider region ${regionCode}`);
+      return list.map((p, position) => {
+        if (!(PROVIDER_TYPES as readonly string[]).includes(p.type)) throw new Error(`${m.id}: bad provider type ${p.type}`);
+        return {
+          movieId: m.id,
+          regionCode,
+          providerId: p.id,
+          name: p.name,
+          type: p.type as ProviderType,
+          price: p.price ?? null,
+          quality: p.quality ?? null,
+          url: p.url,
+          position,
+        };
+      });
+    }),
+  );
+
   const genreRows = (mediaType: MediaType, names: string[]) =>
     [...new Set(names)].map((name) => ({ mediaType, name }));
   const genres = [
@@ -229,6 +251,7 @@ export function buildSeedRows(mock: MockCatalog) {
     movies,
     movieGenres,
     movieCast,
+    movieProviders,
     series,
     seriesAltTitles,
     seriesGenres,

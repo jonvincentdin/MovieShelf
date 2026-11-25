@@ -8,6 +8,7 @@ import {
   languages,
   movieCast,
   movieGenres,
+  movieProviders,
   movies,
   people,
   regions,
@@ -88,7 +89,7 @@ export async function getMovies(db: Db, ids: string[]) {
     cast: castBy.get(m.id) ?? [],
     palette: m.palette,
     availability: m.availability,
-    trailer: m.trailer,
+    trailer: m.trailer && { ...m.trailer, videoUrl: m.trailer.videoUrl ?? null },
     updatedAt: iso(m.updatedAt),
   }));
   return inOrder(ids, dtos);
@@ -299,6 +300,26 @@ export async function getChapterPages(db: Db, chapterId: string) {
     .where(eq(chapterPages.chapterId, chapterId))
     .orderBy(asc(chapterPages.pageNumber));
   return { chapterId: chapter.id, seriesId: chapter.seriesId, pages };
+}
+
+// ---- Where to Watch (BE-25) ----
+
+/** Providers for one movie in one region, in display order. null when the movie doesn't exist. */
+export async function getMovieProviders(db: Db, movieId: string, region: string) {
+  const [movie] = await db.select({ id: movies.id }).from(movies).where(eq(movies.id, movieId));
+  if (!movie) return null;
+  return db
+    .select({
+      id: movieProviders.providerId,
+      name: movieProviders.name,
+      type: movieProviders.type,
+      price: movieProviders.price,
+      quality: movieProviders.quality,
+      url: movieProviders.url,
+    })
+    .from(movieProviders)
+    .where(and(eq(movieProviders.movieId, movieId), eq(movieProviders.regionCode, region)))
+    .orderBy(asc(movieProviders.position));
 }
 
 // ---- Lookups (BE-11) ----

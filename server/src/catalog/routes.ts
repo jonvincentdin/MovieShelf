@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply } from "fastify";
 import type { Db } from "../db/client.ts";
 import * as q from "./queries.ts";
 import { search, suggest, type SearchParams } from "./search.ts";
+import { knownRegion, resolveRegion } from "../region.ts";
 
 const idParam = (prefix: string) => ({
   type: "object",
@@ -67,6 +68,25 @@ export async function catalogRoutes(app: FastifyInstance, { db }: { db: Db }) {
       },
     },
     async (req) => q.listSeries(db, req.query),
+  );
+
+  app.get<{ Params: { id: string }; Querystring: { region?: string } }>(
+    "/api/movies/:id/providers",
+    {
+      schema: {
+        params: idParam("mov"),
+        querystring: { type: "object", properties: { region: { type: "string", pattern: "^[A-Z]{2}$" } } },
+      },
+    },
+    async (req, reply) => {
+      const explicit = req.query.region;
+      if (explicit && !(await knownRegion(db, explicit))) {
+        return reply.status(400).send({ error: { code: "VALIDATION_ERROR", message: `Unknown region ${explicit}` } });
+      }
+      const { region, source } = await resolveRegion(db, req, explicit);
+      const items = await q.getMovieProviders(db, req.params.id, region);
+      return items ? { region, regionSource: source, items } : notFound(reply, "Movie");
+    },
   );
 
   app.get<{ Params: { id: string } }>("/api/series/:id", { schema: { params: idParam("ser") } }, async (req, reply) => {

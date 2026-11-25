@@ -67,6 +67,8 @@ export async function seed(db: Db, mock: MockCatalog = MOCK_CATALOG) {
       .values(rows.movieGenres.map((g) => ({ movieId: g.movieId, genreId: genreId("movie", g.name), position: g.position })));
     await tx.delete(t.movieCast).where(inArray(t.movieCast.movieId, movieIds));
     await tx.insert(t.movieCast).values(rows.movieCast);
+    await tx.delete(t.movieProviders).where(inArray(t.movieProviders.movieId, movieIds));
+    if (rows.movieProviders.length) await tx.insert(t.movieProviders).values(rows.movieProviders);
 
     const seriesIds = rows.series.map((s) => s.id);
     await tx.insert(t.series).values(rows.series).onConflictDoUpdate({
