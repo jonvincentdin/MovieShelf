@@ -5,7 +5,6 @@ import { cuesToSrt, cuesToVtt, type Cue } from "../subtitles/format.ts";
 import {
   PROVIDER_TYPES,
   SUBTITLE_FORMATS,
-  type Availability,
   type MediaType,
   type Palette,
   type ProviderType,
@@ -67,7 +66,7 @@ interface MockMovie {
   director?: string;
   cast: { name: string; character?: string; role?: string }[];
   palette?: Palette;
-  availability?: Omit<Availability, "sizeBytes"> & { sizeLabel: string };
+  availability?: { canStream: boolean; canDownload: boolean; format: string; sizeLabel: string; resolution: string };
   trailer?: Trailer;
   providersByRegion?: Record<string, { id: string; name: string; type: string; price?: string; quality?: string; url: string }[]>;
   trendingRank: number;
@@ -146,9 +145,24 @@ export function buildSeedRows(mock: MockCatalog) {
     return id;
   };
 
-  const toAvailability = ({ sizeLabel, ...rest }: NonNullable<MockMovie["availability"]>): Availability => ({
-    ...rest,
-    sizeBytes: parseSizeBytes(sizeLabel),
+  // BE-35: the mock's per-title availability becomes a worldwide, open-ended license.
+  const licenses = mock.movies.flatMap((m) => {
+    const a = m.availability;
+    if (!a) return [];
+    if (a.canDownload && !a.canStream) throw new Error(`${m.id}: can download but not stream`);
+    return [
+      {
+        movieId: m.id,
+        regionCode: null,
+        canStream: a.canStream,
+        canDownload: a.canDownload,
+        format: a.format,
+        sizeBytes: parseSizeBytes(a.sizeLabel),
+        resolution: a.resolution,
+        startsOn: null,
+        endsOn: null,
+      },
+    ];
   });
 
   const movies = mock.movies.map((m) => {
@@ -168,7 +182,6 @@ export function buildSeedRows(mock: MockCatalog) {
       shortSynopsis: m.shortSynopsis ?? null,
       directorId: m.director ? addPerson(m.director) : null,
       palette: m.palette ?? null,
-      availability: m.availability ? toAvailability(m.availability) : null,
       trailer: m.trailer ?? null,
     };
   });
@@ -297,6 +310,7 @@ export function buildSeedRows(mock: MockCatalog) {
     movieGenres,
     movieCast,
     movieProviders,
+    licenses,
     subtitleTracks,
     series,
     seriesAltTitles,

@@ -1,4 +1,7 @@
+import { sql } from "drizzle-orm";
 import {
+  bigint,
+  check,
   date,
   index,
   integer,
@@ -19,13 +22,18 @@ export type MediaType = "movie" | "series";
 // Placeholder artwork colours from the mock catalog; replaced by posterUrl/backdropUrl once real art exists.
 export type Palette = Record<string, string>;
 
+/** A movie's availability in one region, as the API returns it (computed from `licenses`). */
 export interface Availability {
   canStream: boolean;
   canDownload: boolean;
-  format: string;
+  format: string | null;
   sizeBytes: number | null;
-  resolution: string;
+  resolution: string | null;
   statusText: string;
+  /** Last day of the license now in force; null = open-ended or not licensed. */
+  availableUntil: string | null;
+  /** First day of an upcoming license when nothing is in force yet. */
+  availableFrom: string | null;
 }
 
 export interface Trailer {
@@ -90,8 +98,7 @@ export const movies = pgTable("movies", {
   shortSynopsis: text("short_synopsis"),
   directorId: text("director_id").references(() => people.id),
   palette: jsonb("palette").$type<Palette>(),
-  // shortcut: availability/trailer are per-title JSON until license data (BE-35) and trailer metadata (BE-28) exist.
-  availability: jsonb("availability").$type<Availability>(),
+  // Availability is computed from `licenses` (BE-35).
   trailer: jsonb("trailer").$type<Trailer>(),
   ...timestamps,
 });
@@ -185,6 +192,33 @@ export const chapterPages = pgTable(
     imageUrl: text("image_url"),
   },
   (t) => [primaryKey({ columns: [t.chapterId, t.pageNumber] })],
+);
+
+// ---- Licensing (BE-35, BE-37) ----
+
+// What MovieShelf itself may do with a title, per region and date window. region_code null = worldwide;
+// a region's own license beats the worldwide one. Dates are inclusive, in UTC; null = no limit.
+export const licenses = pgTable(
+  "licenses",
+  {
+    id: serial("id").primaryKey(),
+    movieId: text("movie_id")
+      .notNull()
+      .references(() => movies.id, { onDelete: "cascade" }),
+    regionCode: text("region_code").references(() => regions.code),
+    canStream: boolean("can_stream").notNull(),
+    canDownload: boolean("can_download").notNull(),
+    format: text("format"),
+    sizeBytes: bigint("size_bytes", { mode: "number" }),
+    resolution: text("resolution"),
+    startsOn: date("starts_on", { mode: "string" }),
+    endsOn: date("ends_on", { mode: "string" }),
+  },
+  (t) => [
+    index("licenses_movie_id_idx").on(t.movieId),
+    check("licenses_window_check", sql`${t.startsOn} is null or ${t.endsOn} is null or ${t.startsOn} <= ${t.endsOn}`),
+    check("licenses_download_needs_stream", sql`not ${t.canDownload} or ${t.canStream}`),
+  ],
 );
 
 // ---- Where to Watch (BE-25) ----

@@ -54,8 +54,14 @@ describe("buildSeedRows on the real mock catalog", () => {
     const horizon = rows.movies.find((m) => m.id === "mov-last-horizon")!;
     expect(horizon.runtimeMinutes).toBe(75);
     expect(horizon.rating).toBe(8.9);
-    expect(horizon.availability?.sizeBytes).toBe(640_000_000);
-    expect(horizon.availability).not.toHaveProperty("sizeLabel");
+    const license = rows.licenses.find((l) => l.movieId === "mov-last-horizon")!;
+    expect(license).toMatchObject({ regionCode: null, canStream: true, canDownload: true, sizeBytes: 640_000_000 });
+    expect(license).not.toHaveProperty("sizeLabel");
+  });
+
+  it("gives every movie with availability one worldwide license", () => {
+    expect(rows.licenses).toHaveLength(MOCK_CATALOG.movies.filter((m) => m.availability).length);
+    expect(rows.licenses.find((l) => l.movieId === "mov-after-rain")).toMatchObject({ canStream: true, canDownload: false, sizeBytes: null });
   });
 
   it("orders curation slots by trending rank", () => {

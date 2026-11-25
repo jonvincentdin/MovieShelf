@@ -801,15 +801,27 @@ components:
               role: { type: [string, "null"] }
         palette: { $ref: "#/components/schemas/Palette" }
         availability:
-          description: Per-title for now; computed from license data in BE-35.
-          type: [object, "null"]
+          description: |
+            Computed from license data for the viewer's region (saved region, then CDN country, then PH).
+            A region's own license beats the worldwide one; dates are inclusive, in UTC.
+          type: object
+          required: [canStream, canDownload, statusText]
           properties:
             canStream: { type: boolean }
             canDownload: { type: boolean }
-            format: { type: string }
+            format: { type: [string, "null"], examples: [MP4, HLS Stream] }
             sizeBytes: { type: [integer, "null"], description: Replaces `sizeLabel`. Null for stream-only titles. }
-            resolution: { type: string }
-            statusText: { type: string }
+            resolution: { type: [string, "null"] }
+            statusText:
+              type: string
+              examples:
+                - MP4 • Eligible for download
+                - Authorized for streaming • Download unavailable for this license
+                - Catalog listing • Streaming window opens Dec 1, 2026
+                - Streaming Unavailable
+                - Not available in your region
+            availableUntil: { type: [string, "null"], format: date, description: "Last day of the license in force" }
+            availableFrom: { type: [string, "null"], format: date, description: "First day of an upcoming license" }
         trailer:
           type: [object, "null"]
           properties:
