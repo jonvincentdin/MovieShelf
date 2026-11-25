@@ -1,4 +1,4 @@
-import type { FastifyInstance, FastifyReply } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Db } from "../db/client.ts";
 import * as q from "./queries.ts";
 import { search, suggest, type SearchParams } from "./search.ts";
@@ -25,6 +25,9 @@ const notFound = (reply: FastifyReply, what: string) =>
   reply.status(404).send({ error: { code: "NOT_FOUND", message: `${what} not found` } });
 
 export async function catalogRoutes(app: FastifyInstance, { db }: { db: Db }) {
+  // Movie availability depends on the viewer's region (saved, then CDN country, then PH).
+  const regionOf = async (req: FastifyRequest) => (await resolveRegion(db, req)).region;
+
   app.get<{ Querystring: q.MovieFilters }>(
     "/api/movies",
     {
@@ -42,11 +45,11 @@ export async function catalogRoutes(app: FastifyInstance, { db }: { db: Db }) {
         },
       },
     },
-    async (req) => q.listMovies(db, req.query),
+    async (req) => q.listMovies(db, { ...req.query, region: await regionOf(req) }),
   );
 
   app.get<{ Params: { id: string } }>("/api/movies/:id", { schema: { params: idParam("mov") } }, async (req, reply) => {
-    const movie = await q.getMovie(db, req.params.id);
+    const movie = await q.getMovie(db, req.params.id, await regionOf(req));
     return movie ?? notFound(reply, "Movie");
   });
 
@@ -129,13 +132,13 @@ export async function catalogRoutes(app: FastifyInstance, { db }: { db: Db }) {
         },
       },
     },
-    async (req) => search(db, { ...req.query, q: req.query.q.trim() }),
+    async (req) => search(db, { ...req.query, q: req.query.q.trim(), region: await regionOf(req) }),
   );
 
   app.get<{ Querystring: { q: string } }>(
     "/api/search/suggest",
     { schema: { querystring: { type: "object", required: ["q"], properties: { q: searchText } } } },
-    async (req) => suggest(db, req.query.q.trim()),
+    async (req) => suggest(db, req.query.q.trim(), await regionOf(req)),
   );
 
   app.get<{ Querystring: { type: "movie" | "series" } }>(
@@ -155,5 +158,5 @@ export async function catalogRoutes(app: FastifyInstance, { db }: { db: Db }) {
   app.get("/api/meta/languages", async () => ({ items: await q.getLanguages(db) }));
   app.get("/api/meta/regions", async () => ({ items: await q.getRegions(db) }));
 
-  app.get("/api/home", async () => q.getHome(db));
+  app.get("/api/home", async (req) => q.getHome(db, await regionOf(req)));
 }

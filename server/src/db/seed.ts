@@ -1,4 +1,4 @@
-import { getTableColumns, inArray, sql, type SQL } from "drizzle-orm";
+import { and, getTableColumns, inArray, isNull, sql, type SQL } from "drizzle-orm";
 import type { PgTable } from "drizzle-orm/pg-core";
 import { MOVIES_DATA, MOVIE_GENRES, MOVIE_LANGUAGES, REGIONS, SUBTITLE_CATALOG } from "../../../src/data/moviesData.js";
 import { MANGA_GENRES, MANGA_SERIES } from "../../../src/data/mangaData.js";
@@ -70,6 +70,9 @@ export async function seed(db: Db, mock: MockCatalog = MOCK_CATALOG) {
     await tx.insert(t.movieCast).values(rows.movieCast);
     await tx.delete(t.movieProviders).where(inArray(t.movieProviders.movieId, movieIds));
     if (rows.movieProviders.length) await tx.insert(t.movieProviders).values(rows.movieProviders);
+    // The seed owns the worldwide licenses; per-region licenses added by hand are left alone.
+    await tx.delete(t.licenses).where(and(inArray(t.licenses.movieId, movieIds), isNull(t.licenses.regionCode)));
+    if (rows.licenses.length) await tx.insert(t.licenses).values(rows.licenses);
     if (rows.subtitleTracks.length) {
       await tx.insert(t.subtitleTracks).values(rows.subtitleTracks).onConflictDoUpdate({
         target: t.subtitleTracks.id,

@@ -1,5 +1,7 @@
 import { and, asc, count, desc, eq, gte, inArray, sql, type Column } from "drizzle-orm";
 import type { Db } from "../db/client.ts";
+import { DEFAULT_REGION } from "../region.ts";
+import { availabilityFor } from "./availability.ts";
 import {
   chapterPages,
   chapters,
@@ -42,7 +44,7 @@ export const trendingJoin = (mediaType: MediaType, idColumn: typeof movies.id | 
   and(eq(featuredSlots.slot, "trending"), eq(featuredSlots.mediaType, mediaType), eq(featuredSlots.mediaId, idColumn));
 
 /** Full movie DTOs for `ids`, in the same order. */
-export async function getMovies(db: Db, ids: string[]) {
+export async function getMovies(db: Db, ids: string[], region = DEFAULT_REGION) {
   if (ids.length === 0) return [];
   const rows = await db
     .select({ movie: movies, director: people.name, language: languages.label })
@@ -52,7 +54,7 @@ export async function getMovies(db: Db, ids: string[]) {
     .where(inArray(movies.id, ids));
   if (rows.length === 0) return [];
 
-  const [genreRows, castRows] = await Promise.all([
+  const [genreRows, castRows, availability] = await Promise.all([
     db
       .select({ movieId: movieGenres.movieId, name: genres.name })
       .from(movieGenres)
@@ -65,6 +67,7 @@ export async function getMovies(db: Db, ids: string[]) {
       .innerJoin(people, eq(people.id, movieCast.personId))
       .where(inArray(movieCast.movieId, ids))
       .orderBy(asc(movieCast.position)),
+    availabilityFor(db, ids, region),
   ]);
   const genresBy = group(genreRows, (r) => r.movieId, (r) => r.name);
   const castBy = group(castRows, (r) => r.movieId, ({ id, name, character, role }) => ({ id, name, character, role }));
@@ -88,15 +91,15 @@ export async function getMovies(db: Db, ids: string[]) {
     director,
     cast: castBy.get(m.id) ?? [],
     palette: m.palette,
-    availability: m.availability,
+    availability: availability.get(m.id)!,
     trailer: m.trailer && { ...m.trailer, videoUrl: m.trailer.videoUrl ?? null },
     updatedAt: iso(m.updatedAt),
   }));
   return inOrder(ids, dtos);
 }
 
-export async function getMovie(db: Db, id: string) {
-  return (await getMovies(db, [id]))[0] ?? null;
+export async function getMovie(db: Db, id: string, region?: string) {
+  return (await getMovies(db, [id], region))[0] ?? null;
 }
 
 export type MovieDto = Awaited<ReturnType<typeof getMovies>>[number];
@@ -178,6 +181,7 @@ export interface PageParams {
 export const paged = <T>(items: T[], { page, pageSize }: PageParams, total: number) => ({ items, page, pageSize, total });
 
 export interface MovieFilters extends PageParams {
+  region?: string; // for availability; resolved by the route
   genre?: string;
   language?: string;
   year?: number;
@@ -223,7 +227,7 @@ export async function listMovies(db: Db, f: MovieFilters) {
       .offset(offset(f)),
     db.select({ total: count() }).from(movies).where(where),
   ]);
-  return paged(await getMovies(db, rows.map((r) => r.id)), f, total);
+  return paged(await getMovies(db, rows.map((r) => r.id), f.region), f, total);
 }
 
 /** Series matching the Browse Manga filters. "popularity" is rating order, as the page does today. */
@@ -346,7 +350,7 @@ async function slotItems(db: Db, slot: string, mediaType: MediaType) {
     .orderBy(asc(featuredSlots.position));
 }
 
-export async function getHome(db: Db) {
+export async function getHome(db: Db, region?: string) {
   const [hero, trending, recent, regional, seriesSlots] = await Promise.all([
     slotItems(db, "hero", "movie"),
     slotItems(db, "trending", "movie"),
@@ -356,7 +360,7 @@ export async function getHome(db: Db) {
   ]);
   const movieIds = [...new Set([hero, trending, recent, regional].flat().map((s) => s.id))];
   const [movieList, seriesList] = await Promise.all([
-    getMovies(db, movieIds),
+    getMovies(db, movieIds, region),
     getSeries(db, seriesSlots.map((s) => s.id)),
   ]);
   const moviesById = new Map(movieList.map((m) => [m.id, m]));

@@ -43,6 +43,13 @@
       "when": 1795602752834,
       "tag": "0005_subtitles",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1795603014024,
+      "tag": "0006_licenses",
+      "breakpoints": true
     }
   ]
 }

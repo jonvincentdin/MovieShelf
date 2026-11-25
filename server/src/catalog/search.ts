@@ -7,6 +7,7 @@ export interface SearchParams extends PageParams {
   scope: "all" | "movies" | "series" | "manga" | "manhwa";
   genre?: string;
   sort: "relevance" | "rating" | "year" | "az";
+  region?: string; // for movie availability; resolved by the route
 }
 
 // One searchable text per title: the same fields the frontend searches today
@@ -83,9 +84,9 @@ async function findHits(db: Db, p: Omit<SearchParams, "page" | "pageSize">, limi
   return rows;
 }
 
-async function hydrate(db: Db, hits: Hit[]) {
+async function hydrate(db: Db, hits: Hit[], region?: string) {
   const ids = (kind: Hit["kind"]) => hits.filter((h) => h.kind === kind).map((h) => h.id);
-  const [movieList, seriesList] = await Promise.all([getMovies(db, ids("movie")), getSeries(db, ids("series"))]);
+  const [movieList, seriesList] = await Promise.all([getMovies(db, ids("movie"), region), getSeries(db, ids("series"))]);
   const movieById = new Map(movieList.map((m) => [m.id, m]));
   const seriesById = new Map(seriesList.map((s) => [s.id, s]));
   return hits.flatMap((h) => {
@@ -100,17 +101,17 @@ export async function search(db: Db, p: SearchParams) {
     findHits(db, p, p.pageSize, (p.page - 1) * p.pageSize),
     db.execute<{ total: number }>(sql`${scored(p)} select count(*)::int as total from scored`),
   ]);
-  return paged(await hydrate(db, hits), p, rows[0].total);
+  return paged(await hydrate(db, hits, p.region), p, rows[0].total);
 }
 
 /** BE-14: top matches per kind for the Quick Search box, mirroring its 4 + 4 layout. */
-export async function suggest(db: Db, q: string, limit = 4) {
+export async function suggest(db: Db, q: string, region?: string, limit = 4) {
   const [movieHits, seriesHits] = await Promise.all([
     findHits(db, { q, scope: "movies", sort: "relevance" }, limit, 0),
     findHits(db, { q, scope: "series", sort: "relevance" }, limit, 0),
   ]);
   const [movieList, seriesList] = await Promise.all([
-    getMovies(db, movieHits.map((h) => h.id)),
+    getMovies(db, movieHits.map((h) => h.id), region),
     getSeries(db, seriesHits.map((h) => h.id)),
   ]);
   return { movies: movieList, series: seriesList };
