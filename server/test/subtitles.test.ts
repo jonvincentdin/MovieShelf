@@ -12,7 +12,8 @@ const cues = [
 
 describe("subtitle formats", () => {
   it("SRT converts to WebVTT the player can parse back", () => {
-    const vtt = srtToVtt(`﻿${cuesToSrt(cues).replace(/\n/g, "\r\n")}`);
+    const bom = String.fromCharCode(0xfeff);
+    const vtt = srtToVtt(`${bom}${cuesToSrt(cues).replace(/\n/g, "\r\n")}`);
     expect(vtt.startsWith("WEBVTT\n\n1\n00:00:00.000 --> 00:00:15.000\n")).toBe(true);
     expect(vtt).toContain("01:02:05.250");
     expect(parseVtt(vtt)).toEqual(cues);

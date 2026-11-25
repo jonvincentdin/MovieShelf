@@ -26,9 +26,10 @@ export const cuesToSrt = (cues: Cue[]) =>
  * SRT → WebVTT. The formats differ only in the header and the millisecond separator; SRT's numeric
  * counters are valid VTT cue identifiers, so they stay.
  */
+const stripBom = (s: string) => (s.charCodeAt(0) === 0xfeff ? s.slice(1) : s);
+
 export function srtToVtt(srt: string) {
-  const body = srt
-    .replace(/^﻿/, "")
+  const body = stripBom(srt)
     .replace(/\r\n?/g, "\n")
     .replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, "$1.$2")
     .trim();
@@ -37,5 +38,5 @@ export function srtToVtt(srt: string) {
 
 export function toVtt(content: string, format: "SRT" | "WebVTT") {
   if (format === "SRT") return srtToVtt(content);
-  return content.replace(/^﻿/, "");
+  return stripBom(content);
 }
