@@ -4,6 +4,7 @@ import cors from "@fastify/cors";
 import { catalogRoutes } from "./catalog/routes.ts";
 import type { Db } from "./db/client.ts";
 import { libraryRoutes } from "./library/routes.ts";
+import { subtitleRoutes } from "./subtitles/routes.ts";
 
 export interface AppOptions {
   logger?: boolean;
@@ -65,6 +66,7 @@ export function buildApp({ logger = false, corsOrigins = [], db, cookieSecure = 
   if (db) {
     app.register(catalogRoutes, { db });
     app.register(libraryRoutes, { db, cookieSecure });
+    app.register(subtitleRoutes, { db });
   }
 
   return app;

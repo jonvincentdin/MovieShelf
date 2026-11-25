@@ -115,6 +115,53 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
 
+  /api/movies/{id}/subtitles:
+    get:
+      summary: Subtitle tracks for a movie (metadata only; fetch cues from /api/subtitles/{trackId})
+      operationId: listSubtitleTracks
+      parameters:
+        - $ref: "#/components/parameters/MovieId"
+        - { name: lang, in: query, schema: { type: string, pattern: "^[a-z]{2,3}$", examples: [tl] } }
+      responses:
+        "200":
+          description: Tracks
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, movieId, language, langCode, releaseName, format, hearingImpaired]
+                      properties:
+                        id: { type: string, examples: [sub-en-horizon-web] }
+                        movieId: { type: string }
+                        language: { type: string, examples: [Filipino / Tagalog] }
+                        langCode: { type: string, examples: [tl] }
+                        releaseName: { type: string }
+                        format: { type: string, enum: [SRT, WebVTT], description: "Format as uploaded; always served as WebVTT" }
+                        fps: { type: [string, "null"], examples: ["23.976"] }
+                        hearingImpaired: { type: boolean }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /api/subtitles/{trackId}:
+    get:
+      summary: A subtitle track as WebVTT (SRT is converted on the server)
+      operationId: getSubtitleTrack
+      parameters:
+        - { name: trackId, in: path, required: true, schema: { type: string, pattern: "^sub-[a-z0-9-]{1,128}$" } }
+      responses:
+        "200":
+          description: WebVTT file
+          content:
+            text/vtt:
+              schema: { type: string }
+        "404": { $ref: "#/components/responses/Error" }
+
   /api/me/region:
     get:
       summary: This device's region for Where to Watch, and where it came from
